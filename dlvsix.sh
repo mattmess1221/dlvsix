@@ -91,14 +91,15 @@ download_dist() {
 }
 
 copy_resource() {
-    local file=$1; shift
-    data=$(cat "$resources/$file")
-    while [[ "$#" -gt 0 ]]; do
-        IFS='=' read -r name value <<<"$1"
-        data=${data//\{\{ $name \}\}/"$value"}
-        shift
-    done
-    echo "$data" > "$file"
+	local file=$1
+	shift
+	data=$(cat "$resources/$file")
+	while [[ "$#" -gt 0 ]]; do
+		IFS='=' read -r name value <<<"$1"
+		data=${data//\{\{ $name \}\}/"$value"}
+		shift
+	done
+	echo "$data" >"$file"
 }
 
 #########
@@ -178,10 +179,10 @@ write_readme() {
 	cd "$workdir"
 
 	copy_resource README.txt \
-        VERSION="$version" \
-        COMMIT="$commit"
+		VERSION="$version" \
+		COMMIT="$commit"
 
-    find ./*/ -type f -exec ls -lh {} + | awk '{ printf "%s %s\n", $5, $9 }' | column -t >> README.txt
+	find ./*/ -type f -exec ls -lh {} + | awk '{ printf "%s %s\n", $5, $9 }' | column -t >>README.txt
 }
 
 download_installer
@@ -190,8 +191,8 @@ download_server
 write_readme
 
 copy_resource install-server.sh \
-    COMMIT="$commit" \
-    PLATFORM="linux-x64"
+	COMMIT="$commit" \
+	PLATFORM="linux-x64"
 
 tar czvf "$workdir.tar.gz" -C "${workdir%/*}" "${workdir##*/}"
 
