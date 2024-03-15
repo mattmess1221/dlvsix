@@ -1,0 +1,6 @@
+*.vsix
+*.exe
+*.msi
+*.tar.gz
+
+vscode-extensions/
