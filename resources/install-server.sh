@@ -7,14 +7,36 @@ PLATFORM="{{ PLATFORM }}"
 COMMIT="{{ COMMIT }}"
 
 VSCODE_DIR="$HOME/.vscode-server"
-VSCODE_BIN="$VSCODE_DIR/bin/$COMMIT/bin/code-server"
+VSCODE_SERVER="$VSCODE_DIR/cli/servers/Stable-$COMMIT/server"
+VSCODE_BIN="$VSCODE_SERVER/bin/code-server"
+VSCODE_SERVER_LEGACY="$VSCODE_DIR/bin/$COMMIT"
+VSCODE_CLI="$VSCODE_DIR/code-$COMMIT"
 
+DATA_CLI_TAR="$DATA_DIR/cli-$PLATFORM/$COMMIT/vscode-cli-$PLATFORM-cli.tar.gz"
 DATA_SERVER_TAR="$DATA_DIR/server-$PLATFORM/$COMMIT/server-$PLATFORM.tar.gz"
 DATA_EXTENSION_DIR="$DATA_DIR/extensions"
 
-if [[ ! -f "$VSCODE_BIN" ]]; then
-	mkdir -p "$VSCODE_DIR/bin/$COMMIT"
-	tar xzf "$DATA_SERVER_TAR" -C "$VSCODE_DIR/bin/$COMMIT" --strip-components=1
+if [[ ! -f "$VSCODE_CLI" ]]; then
+	tempdir=$(mktemp -d)
+	tar xzf "$DATA_CLI_TAR" -C "$tempdir"
+	mv "$tempdir/code" "$VSCODE_CLI"
+	rmdir "$tempdir"
+fi
+
+if [[ ! -d "$VSCODE_SERVER" ]]; then
+	tempdir=$(mktemp -d)
+	tar xzf "$DATA_SERVER_TAR" -C "$tempdir"
+	mkdir -p "$(dirname -- "$VSCODE_SERVER")"
+	mv "$tempdir/vscode-server-$PLATFORM" "$VSCODE_SERVER"
+fi
+
+if [[ -d "$VSCODE_SERVER_LEGACY" && ! -L "$VSCODE_SERVER_LEGACY" ]]; then
+	rm -r "$VSCODE_SERVER_LEGACY"
+fi
+
+if [[ ! -L "$VSCODE_SERVER_LEGACY" ]]; then
+	mkdir -p "$(dirname -- "$VSCODE_SERVER_LEGACY")"
+	ln -s "$VSCODE_SERVER" "$VSCODE_SERVER_LEGACY"
 fi
 
 extensions=$("$VSCODE_BIN" --list-extensions --show-versions | tr @ -)

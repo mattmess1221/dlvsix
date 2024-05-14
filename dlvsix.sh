@@ -35,7 +35,9 @@ if [ -n "$WSL_DISTRO_NAME" ]; then
 	# default code cli in WSL won't show client side extensions
 
 	export WSLENV="ELECTRON_RUN_AS_NODE/w:$WSLENV"
-	VSCODE_PATH="$(dirname "$(dirname "$(realpath "$(which code)")")")"
+	# don't run vscode-server's code exe
+	TEMP_PATH=$(echo "$PATH" | tr : $'\n' | grep -v .vscode-server | tr $'\n' :)
+	VSCODE_PATH="$(dirname "$(dirname "$(realpath "$(PATH="$TEMP_PATH" which code)")")")"
 	ELECTRON="$VSCODE_PATH/Code.exe"
 	CLI=$(wslpath -m "$VSCODE_PATH/resources/app/out/cli.js")
 
@@ -155,6 +157,10 @@ download_server() {
 	download_dist "server-linux-x64" "$commit/server-linux-x64.tar.gz"
 }
 
+download_cli() {
+	download_dist "cli-linux-x64" "$commit/vscode-cli-linux-x64-cli.tar.gz"
+}
+
 download_extensions() {
 	safecd "$workdir/extensions"
 
@@ -187,6 +193,7 @@ write_readme() {
 
 download_installer
 download_extensions
+download_cli
 download_server
 write_readme
 
