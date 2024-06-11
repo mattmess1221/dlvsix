@@ -133,9 +133,9 @@ fetch_download_urls() {
 	if [[ "$(jq -r 'has("error")' <<<"$meta")" == false ]]; then
 		result=$(jq -r '.downloads | (.universal // (.["win32-x64"], .["linux-x64"]))' <<<"$meta" | prepend_url_filename)
 		if [[ "$result" == *"null"* ]]; then
-			echo "Download is null" >&2
-			jq . <<<"$meta" >&2
-			exit 1
+			echo "$spec download is null" >&2
+			jq .downloads <<<"$meta" >&2
+			return
 		fi
 		echo "$result"
 	else
@@ -201,6 +201,6 @@ copy_resource install-server.sh \
 	COMMIT="$commit" \
 	PLATFORM="linux-x64"
 
-tar czvf "$workdir.tar.gz" -C "${workdir%/*}" "${workdir##*/}"
+tar czf "$workdir.tar.gz" -C "${workdir%/*}" "${workdir##*/}"
 
 echo "Wrote archive to $workdir.tar.gz"
