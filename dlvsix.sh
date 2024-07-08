@@ -200,6 +200,7 @@ write_readme
 copy_resource install-server.sh \
 	COMMIT="$commit" \
 	PLATFORM="linux-x64"
+chmod +x install-server.sh
 
 tar czf "$workdir.tar.gz" -C "${workdir%/*}" "${workdir##*/}"
 
