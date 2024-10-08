@@ -58,7 +58,9 @@ if [ -n "${WSL_DISTRO_NAME:-}" ]; then
 	# default code cli in WSL won't show client side extensions
 
 	export WSLENV="ELECTRON_RUN_AS_NODE/w:$WSLENV"
-	VSCODE_PATH="$(dirname "$(dirname "$(realpath "$(which code)")")")"
+	# don't run vscode-server's code exe
+	TEMP_PATH=$(echo "$PATH" | tr : $'\n' | grep -v .vscode-server | tr $'\n' :)
+	VSCODE_PATH="$(dirname "$(dirname "$(realpath "$(PATH="$TEMP_PATH" which code)")")")"
 	ELECTRON="$VSCODE_PATH/Code.exe"
 	CLI=$(wslpath -m "$VSCODE_PATH/resources/app/out/cli.js")
 
@@ -173,9 +175,9 @@ fetch_download_urls() {
 	if [[ "$(jq -r 'has("error")' <<<"$meta")" == false ]]; then
 		result=$(jq -r '.downloads | (.universal // (.["win32-x64"], .["linux-x64"]))' <<<"$meta" | prepend_url_filename)
 		if [[ "$result" == *"null"* ]]; then
-			echo "Download is null" >&2
-			jq . <<<"$meta" >&2
-			exit 1
+			echo "$spec download is null" >&2
+			jq .downloads <<<"$meta" >&2
+			return
 		fi
 		echo "$result"
 	else
@@ -203,6 +205,10 @@ download_server() {
 		return
 	fi
 	download_dist "server-linux-x64" "$commit/server-linux-x64.tar.gz"
+}
+
+download_cli() {
+	download_dist "cli-linux-x64" "$commit/vscode-cli-linux-x64-cli.tar.gz"
 }
 
 download_extensions() {
@@ -240,11 +246,13 @@ cd "$workdir"
 
 download_installer
 download_extensions
+download_cli
 download_server
 
 copy_resource install-server.sh \
 	COMMIT="$commit" \
 	PLATFORM="linux-x64"
+chmod +x install-server.sh
 
 declare -a archiving_files=(README.txt extensions/*.vsix)
 if [ "$extensions_only" = 0 ]; then
