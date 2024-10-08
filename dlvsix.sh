@@ -7,7 +7,30 @@
 # - The vscode-server for the currently installed version
 #
 # It supports downloading files directly from open-vsx.org and then microsoft as a fallback.
-set -e
+set -euo pipefail
+
+extensions_only=0
+while [ $# -gt 0 ]; do
+	arg=$1
+	shift
+	case "$arg" in
+	--extensions-only | -x)
+		extensions_only=1
+		;;
+	--help | -h)
+		echo "Usage: $0 [OPTIONS]"
+		echo "Options:"
+		echo "  --extensions-only, -x : Only download and package extensions"
+		echo "  --help, -h            : Display this help text and exit"
+		exit 0
+		;;
+	*)
+		echo "Usage: $0 [OPTIONS]"
+		echo "Run '$0 --help' for help"
+		exit 1
+		;;
+	esac
+done
 
 root="$(cd "${0%/*}" && echo "$PWD")"
 resources=$root/resources
@@ -31,7 +54,7 @@ if [[ "$OSTYPE" =~ cygwin|msys|win32 ]]; then
 	}
 fi
 
-if [ -n "$WSL_DISTRO_NAME" ]; then
+if [ -n "${WSL_DISTRO_NAME:-}" ]; then
 	# default code cli in WSL won't show client side extensions
 
 	export WSLENV="ELECTRON_RUN_AS_NODE/w:$WSLENV"
@@ -50,9 +73,16 @@ mkdir -p "$workdir"
 # helper functions #
 ####################
 
+pushcd() {
+	pushd "$1" >/dev/null
+}
+popcd() {
+	popd >/dev/null
+}
+
 safecd() {
 	mkdir -p "$1"
-	cd "$1"
+	pushcd "$1"
 }
 
 download() {
@@ -82,12 +112,13 @@ cleanup() {
 download_dist() {
 	dist=$1
 	file="$2"
-	safecd "$workdir/$dist"
+	safecd "$dist"
 	url="https://update.code.visualstudio.com/commit:$commit/$dist/stable"
 	if ! [ -f "$file" ]; then
 		download "$url" "$file"
 	fi
 	cleanup "./${file%%/*}" ./*
+	popcd
 }
 
 copy_resource() {
@@ -126,6 +157,17 @@ fetch_download_urls() {
 	pub="${name%.*}"
 	name="${name#*.}"
 
+	if [[ -f "$pub.$name-$vers.vsix" ]]; then
+		echo "$pub.$name-$vers.vsix"
+		return
+	elif [[ 
+		-f "$pub.$name-$vers@win32-x64.vsix" &&
+		-f "$pub.$name-$vers@linux-x64.vsix" ]] \
+		; then
+		echo "$pub.$name-$vers@linux-x64.vsix"
+		echo "$pub.$name-$vers@win32-x64.vsix"
+		return
+	fi
 	metaurl="https://open-vsx.org/api/$pub/$name/$vers"
 	meta=$(curl -sSL "$metaurl")
 	if [[ "$(jq -r 'has("error")' <<<"$meta")" == false ]]; then
@@ -148,15 +190,23 @@ fetch_downloads() {
 }
 
 download_installer() {
+	if [ "$extensions_only" = 1 ]; then
+		echo "Skipping installer download" >&2
+		return
+	fi
 	download_dist "win32-x64-user" "VSCodeUserSetup-x64-$version.exe"
 }
 
 download_server() {
+	if [ "$extensions_only" = 1 ]; then
+		echo "Skipping server download" >&2
+		return
+	fi
 	download_dist "server-linux-x64" "$commit/server-linux-x64.tar.gz"
 }
 
 download_extensions() {
-	safecd "$workdir/extensions"
+	safecd "extensions"
 
 	local all_exts=(*.vsix)
 
@@ -167,33 +217,46 @@ download_extensions() {
 			if [[ "$url" != "https://open-vsx.org"* ]]; then
 				echo "$file is not available on openvsx. Downloading from microsoft." >&2
 			fi
+			file="${file,,}"
 			download "$url" "$file" || echo "Failed to download $file"
 		fi
 		all_exts=("${all_exts[@]/$file/}")
 	done <<<"$downloads"
 
 	cleanup "" "${all_exts[@]}"
+	popcd
 }
 
 write_readme() {
-	cd "$workdir"
-
 	copy_resource README.txt \
 		VERSION="$version" \
 		COMMIT="$commit"
 
-	find ./*/ -type f -exec ls -lh {} + | awk '{ printf "%s %s\n", $5, $9 }' | column -t >>README.txt
+	echo "$*" | xargs ls -lh | awk '{ printf "%s %s\n", $5, $9 }' | column -t >>README.txt
 }
+
+mkdir -p "$workdir"
+cd "$workdir"
 
 download_installer
 download_extensions
 download_server
-write_readme
 
 copy_resource install-server.sh \
 	COMMIT="$commit" \
 	PLATFORM="linux-x64"
 
-tar czvf "$workdir.tar.gz" -C "${workdir%/*}" "${workdir##*/}"
+declare -a archiving_files=(README.txt extensions/*.vsix)
+if [ "$extensions_only" = 0 ]; then
+	archiving_files+=(install-server.sh)
+	archiving_files+=("win32-x64-user/VSCodeUserSetup-x64-$version.exe")
+	archiving_files+=("server-linux-x64/$commit/server-linux-x64.tar.gz")
+fi
 
-echo "Wrote archive to $workdir.tar.gz"
+write_readme "${archiving_files[@]}"
+
+archive_file="../vscode-extensions.tar.gz"
+
+tar czf "$archive_file" "${archiving_files[@]}"
+
+echo "Wrote archive to $(readlink -f "$archive_file")"
