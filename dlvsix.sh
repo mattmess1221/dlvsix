@@ -208,6 +208,10 @@ download_server() {
 }
 
 download_cli() {
+	if [ "$extensions_only" = 1 ]; then
+		echo "Skipping cli download" >&2
+		return
+	fi
 	download_dist "cli-linux-x64" "$commit/vscode-cli-linux-x64-cli.tar.gz"
 }
 
@@ -254,11 +258,17 @@ copy_resource install-server.sh \
 	PLATFORM="linux-x64"
 chmod +x install-server.sh
 
-declare -a archiving_files=(README.txt extensions/*.vsix)
+declare -a archiving_files=(
+	README.txt
+	extensions/*.vsix
+)
 if [ "$extensions_only" = 0 ]; then
-	archiving_files+=(install-server.sh)
-	archiving_files+=("win32-x64-user/VSCodeUserSetup-x64-$version.exe")
-	archiving_files+=("server-linux-x64/$commit/server-linux-x64.tar.gz")
+	archiving_files+=(
+		install-server.sh
+		"win32-x64-user/VSCodeUserSetup-x64-$version.exe"
+		"server-linux-x64/$commit/server-linux-x64.tar.gz"
+		"cli-linux-x64/$commit/vscode-cli-linux-x64-cli.tar.gz"
+	)
 fi
 
 write_readme "${archiving_files[@]}"
