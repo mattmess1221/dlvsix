@@ -499,7 +499,7 @@ class Marketplace:
 
     def get_download_extension_urls(
         self, extension: ExtensionData
-    ) -> dict[str | None, str]:
+    ) -> t.Iterable[tuple[str, str]]:
         ext_name = extension["identifier"]["id"]
         data = self._fetch_extension_data(ext_name)
         if data is None:
@@ -514,13 +514,14 @@ class Marketplace:
                         file["assetType"]
                         == "Microsoft.VisualStudio.Services.VSIXPackage"
                     ):
-                        sources[version.get("targetPlatform")] = file["source"]
+                        platform = version.get("targetPlatform", "universal")
+                        sources[platform] = file["source"]
                         break
 
-        if len(sources) > 1 and None in sources:
-            sources.pop(None)
+        if len(sources) > 1 and "universal" in sources:
+            sources.pop("universal")
 
-        return sources
+        return sources.items()
 
     def is_extension_cached(
         self, extension: ExtensionData, platforms: set[str]
@@ -550,13 +551,12 @@ class Marketplace:
             if self.is_extension_cached(ext, platforms):
                 continue
 
-            urls = self.get_download_extension_urls(ext)
-            for platform, url in urls.items():
-                if platform is not None and platform not in platforms:
+            for platform, url in self.get_download_extension_urls(ext):
+                if platform != "universal" and platform not in platforms:
                     continue
 
                 suffix = ""
-                if platform:
+                if platform != "universal":
                     suffix = f"@{platform}"
 
                 file = f"{ext['identifier']['id']}-{ext['version']}{suffix}.vsix"
@@ -572,7 +572,7 @@ class Marketplace:
         ]
         for old_file in self.extensions_dir.glob(f"{ext['identifier']['id']}-*.vsix"):
             if old_file.name not in files:
-                info(f"Removing {old_file}")
+                info(f"Removing {old_file.relative_to(self.extensions_dir)}")
                 old_file.unlink()
 
 
