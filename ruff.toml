@@ -1,0 +1,32 @@
+target-version = "py39"
+
+[lint]
+select = [
+    "F",    # pyflakes
+    "E",    # pycodestyle-error
+    "W",    # pycodestyle-warning
+    "C90",  # mccabe
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "ANN",  # flake8-annotations
+    "BLE",  # flake8-blind-except
+    "FBT",  # flake8-boolean-trap
+    "B",    # flake8-bugbear
+    "A",    # flake8-builtins
+    "C4",   # flake8-comprehensions
+    "EXE",  # flake8-executable
+    "FA",   # flake8-future-annotations
+    "PIE",  # flake8-pie
+    "SIM",  # flake8-simplifiy
+    "ARG",  # flake8-unused-arguments
+    "ERA",  # eradicate
+    "TRY",  # tryceratops
+    "PERF", # perflint
+    "FURB", # refurb
+    "RUF",  # ruff-specific rules
+]
+ignore = [
+    "ANN1",   # missing type self, missing type cls
+    "ANN401", # any-type
+]

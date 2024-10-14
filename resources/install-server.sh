@@ -5,6 +5,7 @@ DATA_DIR="$(cd "${0%/*}" && echo "$PWD")"
 
 PLATFORM="{{ PLATFORM }}"
 COMMIT="{{ COMMIT }}"
+VERSION="{{ VERSION }}"
 
 VSCODE_DIR="$HOME/.vscode-server"
 VSCODE_SERVER="$VSCODE_DIR/cli/servers/Stable-$COMMIT/server"
@@ -12,22 +13,42 @@ VSCODE_BIN="$VSCODE_SERVER/bin/code-server"
 VSCODE_SERVER_LEGACY="$VSCODE_DIR/bin/$COMMIT"
 VSCODE_CLI="$VSCODE_DIR/code-$COMMIT"
 
-DATA_CLI_TAR="$DATA_DIR/cli-$PLATFORM/$COMMIT/vscode-cli-$PLATFORM-cli.tar.gz"
-DATA_SERVER_TAR="$DATA_DIR/server-$PLATFORM/$COMMIT/server-$PLATFORM.tar.gz"
+ext=".tar.gz"
+if [[ "$PLATFORM" == "win32"* ]]; then
+	ext=".zip"
+fi
+
+DATA_DIST_DIR="$DATA_DIR/dist/$COMMIT"
+DATA_CLI_TAR="$DATA_DIST_DIR/cli-$PLATFORM/$COMMIT/vscode-cli-$PLATFORM-cli.$ext"
+DATA_SERVER_TAR="$DATA_DIST_DIR/code-server-${PLATFORM/alpine/linux}-$VERSION.$ext"
+
 DATA_EXTENSION_DIR="$DATA_DIR/extensions"
+
+universal_extract() {
+	local archive=$1 dest=$2
+	case $archive in
+	*.tar.gz) tar xzf "$archive" -C "$dest" ;;
+	*.zip) unzip -q "$archive" -d "$dest" ;;
+	*)
+		echo "Unsupported archive format: $archive" >&2
+		exit 1
+		;;
+	esac
+}
 
 if [[ ! -f "$VSCODE_CLI" ]]; then
 	tempdir=$(mktemp -d)
-	tar xzf "$DATA_CLI_TAR" -C "$tempdir"
+	universal_extract "$DATA_CLI_TAR" "$tempdir"
 	mv "$tempdir/code" "$VSCODE_CLI"
 	rmdir "$tempdir"
 fi
 
 if [[ ! -d "$VSCODE_SERVER" ]]; then
 	tempdir=$(mktemp -d)
-	tar xzf "$DATA_SERVER_TAR" -C "$tempdir"
+	universal_extract "$DATA_SERVER_TAR" "$tempdir"
 	mkdir -p "$(dirname -- "$VSCODE_SERVER")"
-	mv "$tempdir/vscode-server-$PLATFORM" "$VSCODE_SERVER"
+	mv "$tempdir/vscode-server-${PLATFORM/alpine/linux}" "$VSCODE_SERVER"
+	rmdir "$tempdir"
 fi
 
 if [[ -d "$VSCODE_SERVER_LEGACY" && ! -L "$VSCODE_SERVER_LEGACY" ]]; then

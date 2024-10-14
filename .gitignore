@@ -1,6 +1,14 @@
 *.vsix
 *.exe
 *.msi
-*.tar.gz
+*.tar
+*.tar.[xg]z
+*.tar.bz2
+*.t[bgx]z
+*.tbz2
+*.zip
+
+*.pyc
+__pycache__
 
 vscode-extensions/
