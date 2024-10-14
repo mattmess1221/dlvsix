@@ -9,28 +9,26 @@ Usage requires an internet connected computer with VSCode installed, with all ex
 
 The following requirements are needed on the online host.
 
-- Bash via WSL, cygwin, or msysgit
-- [vscode](https://code.visualstudio.org)
-- [jq](https://jqlang.github.io/jq/)
-- [curl](https://curl.se/)
+- [Python 3.9+](https://www.python.org/downloads)
+- [VS Code](https://code.visualstudio.org) or a supported derivative, like vscodium.
 
-No additional dependencies are required on the offline host. (only bash, tar, sed, and grep are used)
+No additional dependencies are required on the offline host. (only bash, tar, sed, and grep are used for automated installs)
 
 ## Usage
 
-On the online host, run `./dlvsix.sh` with no arguments from a bash session to start the download. All downloaded files will be in the `vscode-extensions/` directory.
+On the online host, run `python3 ./dlvsix.py` with no arguments from a bash session to start the download. All downloaded files will be in the `vscode-extensions/` directory.
 
-Additionally, the folder will be archived to `vscode-extensions.tar.gz` as a convenience. This file should be transfered to the offline host using any method available.
+Additionally, the folder will be archived to `vscode-extensions.zip` as a convenience. This file should be transfered to the offline host using any method available.
 
-On the offline host, extract `vscode-extensions.tar.gz` using the `tar` command. This will create the folder `vscode-extensions`.
+On the offline host, extract `vscode-extensions.zip` using the `unzip` command. This will create the folder `vscode-extensions`.
 
 ```sh
-tar xzf vscode-extensions.tar.gz
+unzip vscode-extensions.zip
 ```
 
 ### Client
 
-From here on for the client, installation is straight-forward. Simply run the vscode user setup from `win32-x64-user/` as on any other host.
+From here on for the client, installation is straight-forward. Simply run the vscode user setup from `dist/[COMMIT]/` as on any other host.
 
 After installing, you can drag + drop the files from the `extensions/` directory to the extensions sidebar inside vscode.
 
@@ -40,6 +38,4 @@ After installing, you can drag + drop the files from the `extensions/` directory
 
 If you are running vscode-server with the Remote Development extension, vscode will try to download the code server from Microsoft. This obviously won't work offline.
 
-Luckily, the `dlvsix.sh` script downloaded the server too. There is even a script `install-server.sh` which gets generated inside `vscode-extensions`.
-
-This script will automatically extract the downloaded vscode server to `~/.vscode-server/bin/` and install all the extensions. Afterwards, you will be able to connect to the remote host in vscode.
+The server will also be downloaded if you have a remote development extension installed. `install-server.sh` will also generate inside `vscode-extensions`. This script will automatically extract the downloaded vscode server to `~/.vscode-server/bin/` and install all the extensions. Afterwards, you will be able to connect to the remote host in vscode.
