@@ -10,7 +10,7 @@ Usage requires an internet connected computer with VSCode installed, with all ex
 The following requirements are needed on the online host.
 
 - [Python 3.9+](https://www.python.org/downloads)
-- [VS Code](https://code.visualstudio.org) or a supported derivative, like vscodium.
+- [VS Code](https://code.visualstudio.org) (derivatives are untested).
 
 No additional dependencies are required on the offline host. (only bash, tar, sed, and grep are used for automated installs)
 

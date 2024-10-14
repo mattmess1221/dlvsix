@@ -135,15 +135,16 @@ class ExtensionGallery(t.TypedDict):
 
 class ProductJson(t.TypedDict):
     applicationName: str
-    win32SetupExeBasename: str
+    win32SetupExeBasename: t.NotRequired[str]
+    win32DirName: str
     darwinExecutable: str
     version: str
     commit: str
     quality: str
     dataFolderName: str
     serverDataFolderName: str
-    updateUrl: str
-    extensionsGallery: ExtensionGallery
+    updateUrl: t.NotRequired[str]
+    extensionsGallery: t.NotRequired[ExtensionGallery]
 
 
 class ExtensionId(t.TypedDict):
@@ -275,15 +276,45 @@ class Product:
             msg = f"Product json not found at {product_json}"
             raise AppError(msg) from None
 
-    def marketplace(self, marketplace_url: str | None) -> Marketplace:
+    def marketplace(
+        self,
+        marketplace_url: str | None,
+        *,
+        raise_if_invalid: bool = True,
+    ) -> Marketplace | None:
         if marketplace_url is None:
-            marketplace_url = self.data["extensionsGallery"]["serviceUrl"]
+            marketplace_url = self.data.get("extensionsGallery", {}).get("serviceUrl")
 
-        debug(f"Using marketplace url: {marketplace_url}")
-        return Marketplace(marketplace_url)
+        if marketplace_url is not None:
+            debug(f"Using marketplace url: {marketplace_url}")
+            return Marketplace(marketplace_url)
 
-    def distributions(self) -> Distributions:
-        return Distributions(self)
+        if raise_if_invalid:
+            msg = (
+                "Unable to load marketplace service url from product.json"
+                " Supply it via --marketplace-url"
+            )
+            raise AppError(msg)
+
+    def distributions(
+        self,
+        update_url: str | None,
+        *,
+        raise_if_invalid: bool,
+    ) -> Distributions | None:
+        if update_url is None:
+            update_url = self.data.get("updateUrl")
+
+        if update_url is not None:
+            debug(f"Using update url: {update_url}")
+            return Distributions(self, update_url)
+
+        if raise_if_invalid:
+            msg = (
+                "Unable to load update url from product.json."
+                " Supply it via --update-url"
+            )
+            raise AppError(msg)
 
     def get_platform_server_name(self, platform: str) -> str:
         name = self.data["applicationName"]
@@ -298,7 +329,8 @@ class Product:
         if platform == "ALL":
             return "(unknown)"
         if platform in ["win32-x64", "win32-arm64"]:
-            basename = self.data["win32SetupExeBasename"]
+            default_user_setup = f"{self.data['win32DirName']}UserSetup"
+            basename = self.data.get("win32SetupExeBasename", default_user_setup)
             return f"{basename}-user-{platform}-{version}.exe"
 
         if platform in ["darwin-x64", "darwin-arm64"]:
@@ -370,16 +402,16 @@ class Extensions:
 
 
 class Distributions:
-    def __init__(self, product: Product) -> None:
+    def __init__(self, product: Product, update_url: str) -> None:
         self.product = product
+        self.update_url = update_url
 
         self.dist_dir = workdir / "dist" / self.product.data["commit"]
         self.dist_dir.mkdir(exist_ok=True, parents=True)
 
     def download_dist(self, dist: str, dest: Path) -> None:
-        update_url = self.product.data["updateUrl"]
         commit = self.product.data["commit"]
-        url = f"{update_url}/commit:{commit}/{dist}/stable"
+        url = f"{self.update_url}/commit:{commit}/{dist}/stable"
         download_file(url, dest)
 
     def download_client(self, target_platform: str) -> None:
@@ -631,6 +663,7 @@ class Args:
     code_home: Path | None
     extensions_dir: Path | None
     marketplace_url: str | None
+    update_url: str | None
 
     platform: str
     server_platform: str
@@ -660,6 +693,10 @@ def parse_args() -> Args:
         "--marketplace-url",
         "-m",
         help="Marketplace URL to download the extension. Default loads from vscode",
+    )
+    parser.add_argument(
+        "--update-url",
+        help="The update url used to download code installers.",
     )
 
     # download options
@@ -775,11 +812,15 @@ def main() -> None:
     product = Product.load(args.code_home)
     extensions = product.load_extensions(args.extensions_dir)
     marketplace = product.marketplace(args.marketplace_url)
+    dists = product.distributions(
+        args.update_url,
+        raise_if_invalid=not args.extensions_only,
+    )
 
-    marketplace.download_extensions(extensions, platforms)
+    if marketplace:
+        marketplace.download_extensions(extensions, platforms)
 
-    if not args.extensions_only:
-        dists = Distributions(product)
+    if dists is not None:
         dists.download_client(args.platform)
 
         should_download_server = args.download_server
