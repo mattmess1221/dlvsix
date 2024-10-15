@@ -17,6 +17,8 @@ select = [
     "C4",   # flake8-comprehensions
     "EXE",  # flake8-executable
     "FA",   # flake8-future-annotations
+    "LOG",  # flake8-logging
+    "G",    # flake8-logging-format
     "PIE",  # flake8-pie
     "SIM",  # flake8-simplifiy
     "ARG",  # flake8-unused-arguments

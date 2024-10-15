@@ -7,17 +7,19 @@ if sys.version_info < (3, 9):  # noqa: UP036
     sys.exit("Python 3.9 or higher is required.")
 
 import argparse
+import io
 import json
+import logging
 import os
 import shutil
 import subprocess
 import tarfile
+import traceback
 import typing as t
 import urllib.parse
 import urllib.request
 import zipfile
 from collections.abc import Generator, Iterable
-from functools import partial
 from pathlib import Path
 
 root = Path(__file__).parent.resolve()
@@ -94,39 +96,61 @@ CODE_HOME_PATHS = [
 
 file_log: set[Path] = set()
 
-GRAY = "\033[90m"
-BLUE = "\033[94m"
-YELLOW = "\033[93m"
-RED = "\033[91m"
 RESET = "\033[0m"
+BOLD = "\033[1m"
+ITALIC = "\033[3m"
+DARK_RED = "\033[31m"
+BG_YELLOW = "\033[43m"
+GRAY = "\033[90m"
+RED = "\033[91m"
+YELLOW = "\033[93m"
+BLUE = "\033[94m"
+WHITE = "\033[97m"
 
 
-LogLevel = t.Literal["debug", "info", "warning", "error"]
-log_colors: dict[LogLevel, str] = {
-    "debug": GRAY,
-    "info": BLUE,
-    "warning": YELLOW,
-    "error": RED,
-}
+class ColorFormatter(logging.Formatter):
+    colors: t.ClassVar = {
+        "debug": GRAY,
+        "info": BLUE,
+        "warning": YELLOW,
+        "error": RED,
+        "critical": BOLD + ITALIC + DARK_RED + BG_YELLOW,
+    }
+
+    if sys.version_info >= (3, 13):
+
+        def formatException(self, exc: t.Any) -> str:  # noqa: N802
+            sio = io.StringIO()
+            traceback.print_exception(*exc, file=sio, colorize=sys.stderr.isatty())  # type: ignore
+            s = sio.getvalue()
+            sio.close()
+            return s.rstrip("\n")
+
+    def format(self, record: logging.LogRecord) -> str:
+        level = record.levelname.lower()
+        prefix = f"{level.capitalize()}:"
+        if record.levelno >= logging.CRITICAL:
+            prefix = prefix.upper()
+        text = super().format(record)
+
+        prefix = prefix.ljust(10)
+        if sys.stderr.isatty():
+            color = self.colors.get(level, WHITE)
+            prefix = prefix.replace(":", f":{RESET}")
+            prefix = f"{color}{prefix}"
+        return f"{prefix}{text}"
 
 
-def log_color(level: LogLevel, text: str) -> str:
-    if sys.stderr.isatty():
-        return f"{log_colors[level]}{text}{RESET}"
-    return text
+def init_logger() -> logging.Logger:
+    log = logging.getLogger()
+    log.setLevel(logging.INFO)
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(ColorFormatter())
+    log.addHandler(handler)
+    return log
 
 
-def _log(level: LogLevel, message: t.Any) -> None:
-    label = f"{level.capitalize()}:"
-    pad_size = max(map(len, log_colors))
-    prefix = log_color(level, f"{label:{pad_size}}")
-    print(f"{prefix} {message}", file=sys.stderr)
-
-
-error = partial(_log, "error")
-warning = partial(_log, "warning")
-info = partial(_log, "info")
-debug = partial(_log, "debug")
+log = init_logger()
 
 
 class ExtensionGallery(t.TypedDict):
@@ -217,7 +241,7 @@ def code_home_paths() -> Generator[Path, None, None]:
 def get_vscode_home() -> Path:
     for path in code_home_paths():
         if (path / PRODUCT_JSON_PATH).exists():
-            debug(f"Detected vscode home at {path}")
+            log.debug("Detected vscode home at %s", path)
             return path
 
     msg = (
@@ -261,14 +285,14 @@ class Product:
         self.code_home = code_home
         self.data = data
 
-        debug(f"Detected vscode version: {data['version']}")
+        log.debug("Detected vscode version: %s", data["version"])
 
     @classmethod
     def load(cls, code_home: Path | None) -> t.Self:
         if code_home is None:
             code_home = get_vscode_home()
         product_json = code_home / PRODUCT_JSON_PATH
-        debug(f"Loading product json from {product_json}")
+        log.debug("Loading product json from %s", product_json)
         try:
             with product_json.open() as f:
                 return cls(code_home, json.load(f))
@@ -286,7 +310,7 @@ class Product:
             marketplace_url = self.data.get("extensionsGallery", {}).get("serviceUrl")
 
         if marketplace_url is not None:
-            debug(f"Using marketplace url: {marketplace_url}")
+            log.debug("Using marketplace url: %s", marketplace_url)
             return Marketplace(marketplace_url)
 
         if raise_if_invalid:
@@ -306,7 +330,7 @@ class Product:
             update_url = self.data.get("updateUrl")
 
         if update_url is not None:
-            debug(f"Using update url: {update_url}")
+            log.debug("Using update url: %s", update_url)
             return Distributions(self, update_url)
 
         if raise_if_invalid:
@@ -354,7 +378,7 @@ class Product:
         if extensions_dir is None:
             extensions_dir = self.get_data_folder() / "extensions"
 
-        debug(f"Loading extensions from {extensions_dir}")
+        log.debug("Loading extensions from %s", extensions_dir)
 
         extensions_json = extensions_dir / "extensions.json"
 
@@ -417,7 +441,7 @@ class Distributions:
     def download_client(self, target_platform: str) -> None:
         for file in self.dist_dir.iterdir():
             if file.is_dir() and file.name != self.product.data["commit"]:
-                info(f"Removing old dist version {file}")
+                log.info("Removing old dist version %s", file)
                 shutil.rmtree(file)
 
         if target_platform.startswith("alpine"):
@@ -503,7 +527,7 @@ class Marketplace:
         ext_name = extension["identifier"]["id"]
         data = self._fetch_extension_data(ext_name)
         if data is None:
-            warning(f"Unable to find {ext_name} in marketplace. Skipping.")
+            log.warning("Unable to find %s in marketplace. Skipping.", ext_name)
             return {}
 
         sources = {}
@@ -572,7 +596,8 @@ class Marketplace:
         ]
         for old_file in self.extensions_dir.glob(f"{ext['identifier']['id']}-*.vsix"):
             if old_file.name not in files:
-                info(f"Removing {old_file.relative_to(self.extensions_dir)}")
+                relative_file = old_file.relative_to(self.extensions_dir)
+                log.info("Removing %s", relative_file)
                 old_file.unlink()
 
 
@@ -580,7 +605,7 @@ def download_file(url: str, dest: Path) -> None:
     file_log.add(dest.resolve())
     if dest.exists():
         return
-    info(f"Downloading {dest.name}")
+    log.info("Downloading %s", dest.name)
     with urllib.request.urlopen(url) as response, open(dest, "wb") as f:
         shutil.copyfileobj(response, f)
 
@@ -590,7 +615,7 @@ def copy_resource(src: Path, dest: Path, /, **kwargs: str) -> None:
     for key, value in kwargs.items():
         old_data = data.replace(b"{{ " + key.encode() + b" }}", value.encode())
         if old_data == data:
-            warning(f"Key '{key}' was not found in {src.name}")
+            log.warning("Key '%s' was not found in %s", key, src.name)
         data = old_data
 
     start_index = 0
@@ -598,7 +623,7 @@ def copy_resource(src: Path, dest: Path, /, **kwargs: str) -> None:
         end = data.find(b" }}", idx)
         start_index = end + 3
         key = data[idx + 3 : end].decode()
-        warning(f"Missing key '{key}' was found in {src.name}")
+        log.warning("Missing key '%s' was found in %s", key, src.name)
 
     dest.write_bytes(data)
     file_log.add(dest.resolve())
@@ -625,7 +650,7 @@ def get_platform_client_download(platform: str) -> str:
 
 
 def create_zip(dest: str, files: Iterable[Path]) -> None:
-    info("Preparing zip archive")
+    log.info("Preparing zip archive")
     with zipfile.ZipFile(dest, "w", compression=zipfile.ZIP_DEFLATED) as zipf:
         for file in files:
             zipf.write(file, file.relative_to(root))
@@ -652,7 +677,7 @@ def create_tar(dest: str, files: Iterable[Path]) -> None:
     mode = get_tar_mode(dest)
 
     arch_fmt = f"tar.{mode}".strip(".")
-    info(f"Preparing {arch_fmt} archive")
+    log.info("Preparing %s archive", arch_fmt)
     mode = f"w:{mode}".strip(":")
     with tarfile.open(dest, mode) as tar:
         for file in files:
@@ -672,6 +697,7 @@ class Args:
     download_only: bool
 
     output_file: str
+    log_level: str
 
 
 def parse_args() -> Args:
@@ -712,10 +738,7 @@ def parse_args() -> Args:
         "-s",
         choices=["ALL", *TARGET_PLATFORMS],
         default="linux-x64",
-        help=(
-            "Server platform, defaults to linux-x64. "
-            "Only used if remoting extensions are present"
-        ),
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--download-server",
@@ -748,6 +771,40 @@ def parse_args() -> Args:
         default="vscode-extensions.zip",
         help="Name of the archive file. Must be a zip or tar archive",
     )
+
+    log_group = parser.add_mutually_exclusive_group()
+    log_group.add_argument(
+        "-v",
+        "--verbose",
+        action="store_const",
+        const="DEBUG",
+        dest="log_level",
+        help="Enable verbose",
+    )
+    log_group.add_argument(
+        "-q",
+        "--quiet",
+        action="store_const",
+        const="WARNING",
+        dest="log_level",
+        help="Disable output except for errors",
+    )
+    log_group.add_argument(
+        "-qq",
+        "--very-quiet",
+        action="store_const",
+        const="ERROR",
+        dest="log_level",
+        help="Disable output except for errors",
+    )
+    log_group.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "FATAL"],
+        help="Set the log level",
+        type=str.upper,
+    )
+    log_group.set_defaults(log_level="INFO")
+
     args = parser.parse_args(namespace=Args())
 
     if not args.output_file.endswith((".zip", *TAR_EXTENSIONS)):
@@ -804,6 +861,8 @@ def copy_install_script(commit: str, version: str, platform: str) -> None:
 def main() -> None:
     args = parse_args()
 
+    log.setLevel(args.log_level)
+
     if args.platform == "ALL" or args.server_platform == "ALL":
         platforms = set(TARGET_PLATFORMS)
     else:
@@ -831,7 +890,9 @@ def main() -> None:
             dists.download_server(args.server_platform)
             dists.download_cli(args.server_platform)
             if args.server_platform == "ALL":
-                warning("Server platform is set to ALL, not including install script")
+                log.warning(
+                    "Server platform is set to ALL, not including install script"
+                )
             else:
                 copy_install_script(
                     product.data["commit"],
@@ -861,5 +922,8 @@ if __name__ == "__main__":
     try:
         main()
     except AppError as e:
-        error(e)
+        log.error(str(e))  # noqa: TRY400
+        sys.exit(1)
+    except Exception:  # noqa: BLE001
+        log.fatal("An unexpected error occurred", exc_info=True)
         sys.exit(1)
