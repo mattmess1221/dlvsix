@@ -56,7 +56,6 @@ class ExtManifest:
     @classmethod
     def from_etree(cls, root: ET.Element) -> ExtManifest | None:
         # parse extension manifest from an xml ElementTree
-        print(root.attrib)
         identity = root.find("Metadata/Identity", xmlns)
         if identity is None:
             return None
