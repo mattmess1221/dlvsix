@@ -18,7 +18,7 @@ from xml.etree import ElementTree as ET
 if TYPE_CHECKING:
     from dlvsix import ExtensionData
 
-extensions_dir = Path(__file__).parent / "extensions"
+extension_cache = Path(__file__).parent / "extensions"
 
 
 def get_platform() -> str:
@@ -221,8 +221,9 @@ def main() -> None:
     print("Installing extensions to:", code_home)
 
     with Extensions(code_home) as exts:
-        for vsix in extensions_dir.glob("*.vsix"):
-            exts.install_extension(vsix, install_server=args.install_server)
+        for file in extension_cache.iterdir():
+            if file.suffix == ".vsix":
+                exts.install_extension(file, install_server=args.install_server)
 
 
 if __name__ == "__main__":
