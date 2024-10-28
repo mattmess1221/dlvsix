@@ -210,10 +210,10 @@ class Extensions:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--install-server", action="store_true")
-    parser.add_argument("--code-home", type=Path)
+    parser.add_argument("--code-home")
     args = parser.parse_args()
     if args.code_home is not None:
-        code_home = args.code_home.resolve()
+        code_home = Path(args.code_home).resolve()
     else:
         code_path = ".vscode-server" if args.install_server else ".vscode"
         code_home = Path.home() / code_path
