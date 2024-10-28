@@ -173,16 +173,28 @@ class ProductJson(t.TypedDict):
 
 class ExtensionId(t.TypedDict):
     id: str
-    uuid: str
+    uuid: t.NotRequired[str]
 
 
-class ExtensionMeta(t.TypedDict):
-    installedTimestamp: int
+class ExtensionMeta(t.TypedDict, total=False):
+    isApplicationScoped: bool
+    isMachineScoped: bool
+    isBuiltin: bool
+    installedTimestamp: t.Required[int]
+    targetPlatform: str
+    pinned: bool
+    source: str
+
+
+class URI(t.TypedDict("BaseURI", {"$mid": int})):
+    scheme: str
+    path: str
 
 
 class ExtensionData(t.TypedDict):
     identifier: ExtensionId
     version: str
+    location: URI
     relativeLocation: str
     metadata: ExtensionMeta
 
@@ -603,7 +615,12 @@ def download_file(url: str, dest: Path) -> None:
         shutil.copyfileobj(response, f)
 
 
-def copy_resource(src: Path, dest: Path, /, **kwargs: str) -> None:
+def copy_resource(src: Path, dest: Path) -> None:
+    shutil.copy(src, dest)
+    file_log.add(dest.resolve())
+
+
+def copy_template(src: Path, dest: Path, /, **kwargs: str) -> None:
     data = src.read_bytes()
     for key, value in kwargs.items():
         old_data = data.replace(b"{{ " + key.encode() + b" }}", value.encode())
@@ -823,7 +840,7 @@ def copy_readme(
     server_home: str,
 ) -> None:
     outfile = workdir / "README.txt"
-    copy_resource(
+    copy_template(
         resources / "README.txt",
         outfile,
         COMMIT=commit,
@@ -841,7 +858,7 @@ def copy_readme(
 
 def copy_install_script(commit: str, version: str, platform: str) -> None:
     outfile = workdir / "install-server.sh"
-    copy_resource(
+    copy_template(
         resources / "install-server.sh",
         outfile,
         COMMIT=commit,
@@ -868,6 +885,10 @@ def main() -> None:
 
     if marketplace:
         marketplace.download_extensions(extensions, platforms)
+        copy_resource(
+            resources / "install-extensions.py",
+            workdir / "install-extensions.py",
+        )
 
     if dists is not None:
         dists.download_client(args.platform)

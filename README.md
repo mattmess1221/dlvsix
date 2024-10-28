@@ -26,6 +26,15 @@ On the offline host, extract `vscode-extensions.zip` using the `unzip` command. 
 unzip vscode-extensions.zip
 ```
 
+### Automated installation
+
+After extracting the zip file on the offline host, you can run the install scripts for an automated install process.
+
+- `install-server.sh`: Installs the vscode server.
+- `install-extensions.py`: Installs the extensions in bulk, both client and server (Requires `--install-server`). This is faster than installing each extension individually.
+
+If you wish to install manually, continue reading.
+
 ### Client
 
 From here on for the client, installation is straight-forward. Simply run the vscode user setup from `dist/[COMMIT]/` as on any other host.
