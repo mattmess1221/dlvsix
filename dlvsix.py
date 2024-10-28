@@ -303,8 +303,6 @@ class Product:
     def marketplace(
         self,
         marketplace_url: str | None,
-        *,
-        raise_if_invalid: bool = True,
     ) -> Marketplace | None:
         if marketplace_url is None:
             marketplace_url = self.data.get("extensionsGallery", {}).get("serviceUrl")
@@ -313,18 +311,15 @@ class Product:
             log.debug("Using marketplace url: %s", marketplace_url)
             return Marketplace(marketplace_url)
 
-        if raise_if_invalid:
-            msg = (
-                "Unable to load marketplace service url from product.json"
-                " Supply it via --marketplace-url"
-            )
-            raise AppError(msg)
+        msg = (
+            "Unable to load marketplace service url from product.json"
+            " Supply it via --marketplace-url"
+        )
+        raise AppError(msg)
 
     def distributions(
         self,
         update_url: str | None,
-        *,
-        raise_if_invalid: bool,
     ) -> Distributions | None:
         if update_url is None:
             update_url = self.data.get("updateUrl")
@@ -333,12 +328,10 @@ class Product:
             log.debug("Using update url: %s", update_url)
             return Distributions(self, update_url)
 
-        if raise_if_invalid:
-            msg = (
-                "Unable to load update url from product.json."
-                " Supply it via --update-url"
-            )
-            raise AppError(msg)
+        msg = (
+            "Unable to load update url from product.json." " Supply it via --update-url"
+        )
+        raise AppError(msg)
 
     def get_platform_server_name(self, platform: str) -> str:
         name = self.data["applicationName"]
@@ -871,10 +864,7 @@ def main() -> None:
     product = Product.load(args.code_home)
     extensions = product.load_extensions(args.extensions_dir)
     marketplace = product.marketplace(args.marketplace_url)
-    dists = product.distributions(
-        args.update_url,
-        raise_if_invalid=not args.extensions_only,
-    )
+    dists = None if args.extensions_only else product.distributions(args.update_url)
 
     if marketplace:
         marketplace.download_extensions(extensions, platforms)
