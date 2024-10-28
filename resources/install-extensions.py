@@ -22,6 +22,8 @@ extension_cache = Path(__file__).parent / "extensions"
 
 
 def get_platform() -> str:
+    # get the current platform in the format used by vscode
+    # only windows/linux x64 are tested
     system = platform.system().lower()
     if system == "windows":
         system = "win32"
@@ -53,6 +55,7 @@ class ExtManifest:
 
     @classmethod
     def from_etree(cls, root: ET.Element) -> ExtManifest | None:
+        # parse extension manifest from an xml ElementTree
         print(root.attrib)
         identity = root.find("Metadata/Identity", xmlns)
         if identity is None:
@@ -85,9 +88,11 @@ class Extensions:
 
     @staticmethod
     def json_dumps(obj: Any) -> str:
+        # be as close to the original as possible
         return json.dumps(obj, separators=(",", ":"))
 
     def __enter__(self) -> Extensions:
+        # load data from filesystem
         self.obsolete: dict[str, bool] = {}
         with contextlib.suppress(FileNotFoundError):
             self.obsolete = json.loads(self.obsolete_file.read_text())
@@ -101,6 +106,7 @@ class Extensions:
         return self
 
     def __exit__(self, *_: Any) -> None:
+        # save data to filesystem if needed
         if self.obsolete_dirty:
             self.obsolete_file.write_text(self.json_dumps(self.obsolete))
 
@@ -108,6 +114,7 @@ class Extensions:
             self.extensions_file.write_text(self.json_dumps(self.extensions))
 
     def get_extension(self, ext_id: str, version: str) -> ExtensionData | None:
+        # find extension by id and/or version. obsolete extensions are ignored
         for ext in self.extensions:
             if ext["identifier"]["id"].lower() == ext_id and (
                 not self.is_obsolete(ext) or ext["version"] == version
@@ -116,10 +123,15 @@ class Extensions:
         return None
 
     def is_obsolete(self, ext: ExtensionData) -> bool:
+        # check if extension is obsolete
         ext_id = f"{ext['identifier']['id']}-{ext['version']}".lower()
         return self.obsolete.get(ext_id, False)
 
     def extract_vsix(self, z: zipfile.ZipFile, dest: Path) -> None:
+        # extract extension to the filesystem.
+        # only the subpath "extension" is extracted
+        # the file "extension.vsixmanifest" is renamed to ".vsixmanifest"
+        # any errors are printed to the console
         dest.mkdir(parents=True, exist_ok=True)
         with (
             z.open("extension.vsixmanifest") as f,
@@ -140,6 +152,16 @@ class Extensions:
                 print(f"{type(e).__name__}: {e}")
 
     def install_extension(self, vsix: Path, *, install_server: bool = False) -> None:
+        # install extension from a vsix file
+        # the vsixmanifest file is read to get the extension metadata
+        # The extension is extracted if the following conditions are met:
+        # - the platform is unset or matches the current platform
+        # - the version is not already installed
+        # - if `install_server` is True, the extension kind includes workspace
+        #
+        # When the extension is installed, the metadata is added to the extensions list
+        # and the previous version is marked as obsolete
+
         with zipfile.ZipFile(vsix) as z:
             with z.open("extension.vsixmanifest") as f:
                 mft = ExtManifest.from_etree(ET.fromstring(f.read()))
