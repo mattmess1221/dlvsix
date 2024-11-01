@@ -7,6 +7,7 @@ import json
 import os
 import platform
 import shutil
+import sys
 import time
 import urllib.parse
 import zipfile
@@ -33,13 +34,18 @@ def is_server() -> bool:
 def get_platform() -> str:
     # get the current platform in the format used by vscode
     # only windows/linux x64 are tested
-    system = platform.system().lower()
-    if system == "windows":
+    system = sys.platform
+    if system in ("cygwin", "msys"):
         system = "win32"
 
     arch = platform.machine().lower()
+    # note, vscode no longer ships Windows x86 32-bit builds
     if arch in ("amd64", "x86_64"):
         arch = "x64"
+    elif arch == "aarch64":
+        arch = "arm64"
+    elif arch in ("armv6l", "armv7l"):
+        arch = "armhf"
 
     return f"{system}-{arch}"
 
