@@ -620,22 +620,25 @@ def copy_resource(src: Path, dest: Path) -> None:
     file_log.add(dest.resolve())
 
 
-def copy_template(src: Path, dest: Path, /, **kwargs: str) -> None:
-    data = src.read_bytes()
+def copy_template(
+    src: Path, dest: Path, /, *, newline: str = os.linesep, **kwargs: str
+) -> None:
+    data = src.read_text()
+
     for key, value in kwargs.items():
-        old_data = data.replace(b"{{ " + key.encode() + b" }}", value.encode())
+        old_data = data.replace("{{ " + key + " }}", value)
         if old_data == data:
             log.warning("Key '%s' was not found in %s", key, src.name)
         data = old_data
 
     start_index = 0
-    while (idx := data.find(b"{{ ", start_index)) != -1:
-        end = data.find(b" }}", idx)
+    while (idx := data.find("{{ ", start_index)) != -1:
+        end = data.find(" }}", idx)
         start_index = end + 3
-        key = data[idx + 3 : end].decode()
+        key = data[idx + 3 : end]
         log.warning("Missing key '%s' was found in %s", key, src.name)
 
-    dest.write_bytes(data)
+    dest.write_text(data, newline=newline)
     file_log.add(dest.resolve())
 
 
@@ -856,16 +859,19 @@ def copy_readme(
             f.write(f"{bytes_to_human(size):12}{file.relative_to(workdir)}\n")
 
 
+def copy_script(src: Path, dest: Path, **kwargs: str) -> None:
+    copy_template(src, dest, newline="\n", **kwargs)
+    dest.chmod(0o755)
+
+
 def copy_install_script(commit: str, version: str, platform: str) -> None:
-    outfile = workdir / "install-server.sh"
-    copy_template(
+    copy_script(
         resources / "install-server.sh",
-        outfile,
+        workdir / "install-server.sh",
         COMMIT=commit,
         PLATFORM=platform,
         VERSION=version,
     )
-    outfile.chmod(0o755)
 
 
 def main() -> None:
@@ -885,7 +891,7 @@ def main() -> None:
 
     if marketplace:
         marketplace.download_extensions(extensions, platforms)
-        copy_resource(
+        copy_script(
             resources / "install-extensions.py",
             workdir / "install-extensions.py",
         )
