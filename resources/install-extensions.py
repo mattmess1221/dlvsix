@@ -21,6 +21,15 @@ if TYPE_CHECKING:
 extension_cache = Path(__file__).parent / "extensions"
 
 
+def is_server() -> bool:
+    # check if the script is running in the server environment
+    return (
+        "SSH_CLIENT" in os.environ
+        or "WSL_DISTRO_NAME" in os.environ
+        or "WSL_INTEROP" in os.environ
+    )
+
+
 def get_platform() -> str:
     # get the current platform in the format used by vscode
     # only windows/linux x64 are tested
@@ -76,6 +85,10 @@ class Extensions:
     def __init__(self, code_home: Path) -> None:
         self.code_home = code_home
         self.extensions_dir = code_home / "extensions"
+
+    @property
+    def is_server(self) -> bool:
+        return self.code_home.name.endswith("-server")
 
     @property
     def extensions_file(self) -> Path:
@@ -150,7 +163,7 @@ class Extensions:
             except OSError as e:
                 print(f"{type(e).__name__}: {e}")
 
-    def install_extension(self, vsix: Path, *, install_server: bool = False) -> None:
+    def install_extension(self, vsix: Path) -> None:
         # install extension from a vsix file
         # the vsixmanifest file is read to get the extension metadata
         # The extension is extracted if the following conditions are met:
@@ -169,7 +182,7 @@ class Extensions:
                 print(f"warning: Invalid extension manifest for {vsix.name}")
                 return
 
-            if install_server and "workspace" not in mft.kinds:
+            if self.is_server and "workspace" not in mft.kinds:
                 return
 
             if mft.platform is None or mft.platform == current_platform:
@@ -228,23 +241,47 @@ class Extensions:
         self.obsolete_dirty = True
 
 
+class Args:
+    code_home: Path
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--install-server", action="store_true")
-    parser.add_argument("--code-home")
-    args = parser.parse_args()
-    if args.code_home is not None:
-        code_home = Path(args.code_home).resolve()
-    else:
-        code_path = ".vscode-server" if args.install_server else ".vscode"
-        code_home = Path.home() / code_path
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--server",
+        "-s",
+        dest="code_home",
+        action="store_const",
+        const=Path.home() / ".vscode-server",
+        help="Force install in the server directory. Default is autodetect.",
+    )
+    group.add_argument(
+        "--client",
+        "-c",
+        dest="code_home",
+        action="store_const",
+        const=Path.home() / ".vscode",
+        help="Force install in the client directory. Default is autodetect.",
+    )
+    group.add_argument(
+        "--code-home",
+        dest="code_home",
+        type=Path,
+        help="Specify the code home directory.",
+    )
+    group.set_defaults(
+        code_home=Path.home() / [".vscode", ".vscode-server"][is_server()]
+    )
+    args = parser.parse_args(namespace=Args())
+    code_home = args.code_home.resolve()
 
     print("Installing extensions to:", code_home)
 
     with Extensions(code_home) as exts:
         for file in extension_cache.iterdir():
             if file.suffix == ".vsix":
-                exts.install_extension(file, install_server=args.install_server)
+                exts.install_extension(file)
 
 
 if __name__ == "__main__":
