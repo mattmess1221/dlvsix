@@ -44,7 +44,7 @@ xmlns = {
 }
 
 
-@dataclass(kw_only=True)
+@dataclass()
 class ExtManifest:
     id: str
     version: str
