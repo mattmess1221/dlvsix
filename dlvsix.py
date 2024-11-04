@@ -866,8 +866,9 @@ def copy_script(src: Path, dest: Path, **kwargs: str) -> None:
 
 def copy_install_script(commit: str, version: str, platform: str) -> None:
     copy_script(
-        resources / "install-server.sh",
-        workdir / "install-server.sh",
+        # TODO externalize templated variables
+        resources / "install-server.py",
+        workdir / "install-server.py",
         COMMIT=commit,
         PLATFORM=platform,
         VERSION=version,

@@ -30,8 +30,8 @@ unzip vscode-extensions.zip
 
 After extracting the zip file on the offline host, you can run the install scripts for an automated install process.
 
-- `install-server.sh`: Installs the vscode server.
-- `install-extensions.py`: Installs the extensions in bulk, both client and server (Requires `--install-server`). This is faster than installing each extension individually.
+- `install-server.py`: Installs the vscode server. Run this on the remote host.
+- `install-extensions.py`: Installs the extensions in bulk, both client and server. This is faster than installing each extension individually.
 
 If you wish to install manually, continue reading.
 
