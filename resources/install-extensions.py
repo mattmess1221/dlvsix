@@ -282,6 +282,10 @@ def main() -> None:
     args = parser.parse_args(namespace=Args())
     code_home = args.code_home.resolve()
 
+    install_extensions(code_home)
+
+
+def install_extensions(code_home: Path) -> None:
     print("Installing extensions to:", code_home)
 
     with Extensions(code_home) as exts:
