@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 
@@ -25,7 +26,9 @@ def universal_extract(archive: Path, dest: Path) -> None:
     # extract the archive to the destination
     # if it is a tar file, apply the tar filter to copy permissions
     kwargs = {}
-    if archive.suffix != ".zip":
+    # tarfile filters were added in 3.12 with PEP-706
+    # 3.14 will change the default to data, which is safe, but insuffient
+    if sys.version_info >= (3, 12) and archive.suffix != ".zip":
         kwargs["filter"] = "tar"
     shutil.unpack_archive(archive, dest, **kwargs)
 
