@@ -222,7 +222,8 @@ class AppError(Exception):
 def expand_var_paths(paths: list[str]) -> Generator[Path, None, None]:
     for path in paths:
         if IS_WSL and "%" in path:
-            path = resolve_win_interp(path)
+            path = win_path_to_wsl(resolve_win_interp(path))
+
         path = os.path.expandvars(path)
         path = os.path.expanduser(path)
 
