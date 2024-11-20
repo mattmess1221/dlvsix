@@ -42,7 +42,8 @@ TARGET_PLATFORMS = [
     "alpine-arm64",
 ]
 
-TAR_MODES = {
+TarFormat: t.TypeAlias = t.Literal["gz", "bz2", "xz", ""]
+TAR_MODES: dict[str | tuple[str, ...], TarFormat] = {
     (".tar.gz", ".tgz"): "gz",
     (".tar.xz", ".txz"): "xz",
     (".tar.bz2", ".tbz2", ".tbz"): "bz2",
@@ -705,7 +706,7 @@ def multidict(d: dict[str | tuple[str, ...], str]) -> dict[str, str]:
     }
 
 
-def get_tar_mode(file: str) -> str:
+def get_tar_mode(file: str) -> TarFormat:
     for ext in TAR_MODES:
         if file.endswith(ext):
             return TAR_MODES[ext]
@@ -719,8 +720,7 @@ def create_tar(dest: str, files: Iterable[Path]) -> None:
 
     arch_fmt = f"tar.{mode}".strip(".")
     log.info("Preparing %s archive", arch_fmt)
-    mode = f"w:{mode}".strip(":")
-    with tarfile.open(dest, mode) as tar:
+    with tarfile.open(dest, "w:" + mode) as tar:
         for file in files:
             tar.add(file, file.relative_to(root))
 
