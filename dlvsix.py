@@ -221,7 +221,7 @@ class AppError(Exception):
 def expand_var_paths(paths: list[str]) -> Generator[Path, None, None]:
     for path in paths:
         if IS_WSL and "%" in path:
-            path = resolve_win_env_path(path)
+            path = resolve_win_interp(path)
         path = os.path.expandvars(path)
         path = os.path.expanduser(path)
 
@@ -263,14 +263,42 @@ def get_vscode_home() -> Path:
     raise AppError(msg)
 
 
-def resolve_win_env_path(path: str) -> str:
-    windows_path = subprocess.check_output(["cmd.exe", "/c", f"echo {path}"]).strip()
-    unix_path = subprocess.check_output(["wslpath", "-u", windows_path]).strip()
-    return unix_path.decode()
+def resolve_win_interp(args: str) -> str:
+    """Resolve windows environment variables through cmd.exe"""
+    root_path = win_path_to_wsl("C:\\")
+    # use the full path to cmd in case the user disabled windows interop or modified the
+    # PATH
+    cmd_path = win_path_to_wsl("C:\\Windows\\System32\\cmd.exe")
+    return subprocess.check_output(
+        [cmd_path, "/c", f"echo {args}"],
+        encoding="utf-8",
+        # cmd doesn't like being started with a WSL CWD
+        cwd=root_path,
+    ).strip()
+
+
+def get_win_home() -> Path:
+    return win_path_to_wsl(resolve_win_interp("%USERPROFILE%"))
+
+
+def win_path_to_wsl(path: str) -> Path:
+    return Path(
+        subprocess.check_output(
+            ["wslpath", "-u", path],
+            encoding="utf-8",
+        ).strip()
+    )
+
+
+def wsl_path_to_win(path: str | Path) -> str:
+    return subprocess.check_output(
+        ["wslpath", "-w", path],
+        encoding="utf-8",
+    ).strip()
 
 
 def is_wsl_windows_mount(path: Path) -> bool:
-    win_path = subprocess.check_output(["wslpath", "-w", path]).strip().decode()
+    win_path = wsl_path_to_win(path)
 
     # windows mounts will include the drive letter. wsl paths will start with \\
     return not win_path.startswith(r"\\")
@@ -282,7 +310,7 @@ def flatpak_paths() -> Generator[Path, None, None]:
 
 def get_home(path: Path) -> Path:
     if IS_WSL and is_wsl_windows_mount(path):
-        return Path(resolve_win_env_path("%USERPROFILE%"))
+        return get_win_home()
 
     for flatpak in flatpak_paths():
         if path.is_relative_to(flatpak):
