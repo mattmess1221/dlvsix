@@ -404,7 +404,7 @@ class Product:
         home = get_home(self.code_home)
         for flatpak in flatpak_paths():
             if self.code_home.is_relative_to(flatpak):
-                flatpak_name = self.code_home.relative_to(flatpak).parts[0]
+                flatpak_name = self.code_home.relative_to(flatpak).parts[1]
                 return home / FLATPAK_APPS[flatpak_name][1]
 
         return home / self.data["dataFolderName"]
