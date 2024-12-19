@@ -588,13 +588,15 @@ class Marketplace:
         name = extension["identifier"]["id"]
         vers = extension["version"]
 
-        file = self.extensions_dir / f"{name}-{vers}.vsix"
+        base = self.extensions_dir / name / vers
+
+        file = base / f"{name}-{vers}.vsix"
         if file.exists():
             file_log.add(file.resolve())
             return True
 
         for platform in platforms:
-            file = self.extensions_dir / f"{name}-{vers}@{platform}.vsix"
+            file = base / f"{name}-{vers}@{platform}.vsix"
             if not file.exists():
                 return False
             file_log.add(file.resolve())
@@ -618,22 +620,20 @@ class Marketplace:
                 if platform != "universal":
                     suffix = f"@{platform}"
 
+                base = self.extensions_dir / ext["identifier"]["id"] / ext["version"]
                 file = f"{ext['identifier']['id']}-{ext['version']}{suffix}.vsix"
-                download_file(url, self.extensions_dir / file)
+                download_file(url, base / file)
 
             self.cleanup_old_extension_versions(ext)
 
     def cleanup_old_extension_versions(self, ext: ExtensionData) -> None:
-        # all possible file names for all platforms
-        files = [f"{ext['identifier']['id']}-{ext['version']}.vsix"] + [
-            f"{ext['identifier']['id']}-{ext['version']}@{platform}.vsix"
-            for platform in TARGET_PLATFORMS
-        ]
-        for old_file in self.extensions_dir.glob(f"{ext['identifier']['id']}-*.vsix"):
-            if old_file.name not in files:
-                relative_file = old_file.relative_to(self.extensions_dir)
-                log.info("Removing %s", relative_file)
-                old_file.unlink()
+        ext_dir = self.extensions_dir / ext["identifier"]["id"]
+        for vers_dir in ext_dir.iterdir():
+            if vers_dir.is_dir() and vers_dir.name != ext["version"]:
+                for old_file in vers_dir.iterdir():
+                    log.info("Removing %s", old_file.name)
+                    old_file.unlink()
+                vers_dir.rmdir()
 
 
 def download_file(url: str, dest: Path) -> None:
@@ -641,7 +641,9 @@ def download_file(url: str, dest: Path) -> None:
     if dest.exists():
         return
     log.info("Downloading %s", dest.name)
-    with urllib.request.urlopen(url) as response, open(dest, "wb") as f:
+
+    dest.parent.mkdir(exist_ok=True, parents=True)
+    with urllib.request.urlopen(url) as response, dest.open("wb") as f:
         shutil.copyfileobj(response, f)
 
 

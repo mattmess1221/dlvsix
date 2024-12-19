@@ -289,9 +289,8 @@ def install_extensions(code_home: Path) -> None:
     print("Installing extensions to:", code_home)
 
     with Extensions(code_home) as exts:
-        for file in extension_cache.iterdir():
-            if file.suffix == ".vsix":
-                exts.install_extension(file)
+        for file in extension_cache.rglob("*.vsix"):
+            exts.install_extension(file)
 
 
 if __name__ == "__main__":
