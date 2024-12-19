@@ -29,6 +29,5 @@ select = [
     "RUF",  # ruff-specific rules
 ]
 ignore = [
-    "ANN1",   # missing type self, missing type cls
     "ANN401", # any-type
 ]

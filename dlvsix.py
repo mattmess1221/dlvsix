@@ -231,11 +231,8 @@ def expand_var_paths(paths: list[str]) -> Generator[Path, None, None]:
             # Ignore incomplete environment variables
             continue
 
-        if (
-            os.name != "nt"
-            and ":\\" in path
-            or os.name == "nt"
-            and path.startswith("/")
+        if (os.name != "nt" and ":\\" in path) or (
+            os.name == "nt" and path.startswith("/")
         ):
             # Ignore non-windows path on windows
             continue
