@@ -41,7 +41,8 @@ From here on for the client, installation is straight-forward. Simply run the vs
 
 After installing, you can drag + drop the files from the `extensions/` directory to the extensions sidebar inside vscode.
 
-**Note**: Some extensions may have been downloaded for multiple platforms. Be sure to just install your platform's extension. **VSCode will not warn you** when you install the wrong one.
+> [!WARNING]
+> Some extensions may have been downloaded for multiple platforms. Be sure to just install your platform's extension. **VSCode will not warn you** when you install the wrong one.
 
 ### Server
 
