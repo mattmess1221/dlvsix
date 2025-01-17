@@ -144,9 +144,22 @@ class Progress:
 
     def __init__(self) -> None:
         if rich:
-            from rich.progress import Progress
+            from rich.progress import (
+                BarColumn,
+                DownloadColumn,
+                Progress,
+                TaskProgressColumn,
+                TextColumn,
+                TimeRemainingColumn,
+            )
 
-            self.progress = Progress()
+            self.progress = Progress(
+                TextColumn("[progress.description]{task.description:80}"),
+                BarColumn(),
+                DownloadColumn(),
+                TaskProgressColumn(),
+                TimeRemainingColumn(),
+            )
 
     def __enter__(self) -> t.Self:
         if self.progress:
@@ -157,16 +170,20 @@ class Progress:
         if self.progress:
             self.progress.stop()
 
-    def track(self, iterable: Iterable[T], *, task_id: TaskID | None) -> Iterable[T]:
-        if self.progress:
-            return self.progress.track(iterable, task_id=task_id)
+    @classmethod
+    def track(cls, sequence: Iterable[T], **kwargs: t.Any) -> Iterable[T]:
+        global rich
+        if rich:
+            from rich.progress import track
 
-        return iterable
+            return track(sequence, **kwargs)
+
+        return sequence
 
     @contextlib.contextmanager
     def task(self, description: str) -> t.Generator[TaskID | None]:
         if self.progress:
-            task = self.progress.add_task(description)
+            task = self.progress.add_task(description, total=None)
             try:
                 yield task
             finally:
@@ -545,10 +562,14 @@ class Distributions:
         self.dist_dir = workdir / "dist" / self.product.data["commit"]
         self.dist_dir.mkdir(exist_ok=True, parents=True)
 
-    def download_dist(self, dist: str, dest: Path, *, progress: Progress) -> None:
+    def download_dist(
+        self, dist: str, dest: Path, *, progress: Progress, executor: ThreadPoolExecutor
+    ) -> None:
+        if dest.exists():
+            return
         commit = self.product.data["commit"]
         url = f"{self.update_url}/commit:{commit}/{dist}/stable"
-        download_file(url, dest, progress=progress)
+        executor.submit(download_file, url, dest, progress=progress)
 
     def download_client(
         self, target_platform: str, executor: ThreadPoolExecutor, progress: Progress
@@ -564,11 +585,12 @@ class Distributions:
         for platform in self.get_dist_platforms(target_platform):
             if platform.startswith("alpine"):
                 continue
-            executor.submit(
-                self.download_dist,
+
+            self.download_dist(
                 get_platform_client_download(platform),
                 self.dist_dir / self.product.get_platform_client_name(platform),
                 progress=progress,
+                executor=executor,
             )
 
     def download_server(
@@ -581,11 +603,11 @@ class Distributions:
             if platform.startswith("alpine"):
                 continue
             name = self.product.get_platform_server_name(platform)
-            executor.submit(
-                self.download_dist,
+            self.download_dist(
                 get_platform_server_download(platform),
                 self.dist_dir / name,
                 progress=progress,
+                executor=executor,
             )
 
     def download_cli(
@@ -593,11 +615,11 @@ class Distributions:
     ) -> None:
         for platform in self.get_dist_platforms(target_platform):
             ext = "zip" if platform.startswith("win32") else "tar.gz"
-            executor.submit(
-                self.download_dist,
+            self.download_dist(
                 f"cli-{platform}",
                 self.dist_dir / f"vscode-cli-{platform}-cli.{ext}",
                 progress=progress,
+                executor=executor,
             )
 
     @staticmethod
@@ -731,10 +753,6 @@ class Marketplace:
 
 
 def download_file(url: str, dest: Path, *, progress: Progress) -> None:
-    file_log.add(dest.resolve())
-    if dest.exists():
-        return
-
     dest.parent.mkdir(exist_ok=True, parents=True)
     with progress.task(f"Downloading {dest.name}") as task:
         urllib.request.urlretrieve(url, dest, progress.urllib_callback(task))
@@ -797,10 +815,10 @@ def get_platform_client_download(platform: str) -> str:
 def create_zip(dest: Path, files: Iterable[Path], progress: Progress) -> None:
     log.info("Preparing zip archive")
     with (
-        progress.task(dest.name) as task_id,
+        # progress.task(dest.name) as task_id,
         zipfile.ZipFile(dest, "w", compression=zipfile.ZIP_DEFLATED) as zipf,
     ):
-        for file in progress.track(files, task_id=task_id):
+        for file in progress.track(files, description=dest.name):
             zipf.write(file, file.relative_to(root))
 
 
@@ -826,8 +844,8 @@ def create_tar(dest: Path, files: Iterable[Path], progress: Progress) -> None:
 
     arch_fmt = f"tar.{mode}".strip(".")
     log.info("Preparing %s archive", arch_fmt)
-    with progress.task(dest.name) as task_id, tarfile.open(dest, "w:" + mode) as tar:
-        for file in progress.track(files, task_id=task_id):
+    with tarfile.open(dest, "w:" + mode) as tar:
+        for file in progress.track(files, description=dest.name):
             tar.add(file, file.relative_to(root))
 
 
@@ -1075,11 +1093,11 @@ def main() -> None:
             server_home=product.data["serverDataFolderName"],
         )
 
-        if not args.download_only:
-            if args.output_file.suffix == ".zip":
-                create_zip(args.output_file, files, progress)
-            else:
-                create_tar(args.output_file, files, progress)
+    if not args.download_only:
+        if args.output_file.suffix == ".zip":
+            create_zip(args.output_file, files, progress)
+        else:
+            create_tar(args.output_file, files, progress)
 
 
 if __name__ == "__main__":
