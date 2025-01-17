@@ -667,7 +667,13 @@ def copy_template(
         key = data[idx + 3 : end]
         log.warning("Missing key '%s' was found in %s", key, src.name)
 
-    dest.write_text(data, newline=newline)
+    if sys.version_info >= (3, 10):
+        dest.write_text(data, newline=newline)
+    else:
+        # pathlib write_text(newline=...) is not supported in 3.9
+        with dest.open("w", newline=newline) as f:
+            f.write(data)
+
     file_log.add(dest.resolve())
 
 
