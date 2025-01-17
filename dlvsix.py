@@ -959,7 +959,7 @@ def parse_args() -> Args:
         help="Set the log level",
         type=str.upper,
     )
-    log_group.set_defaults(log_level="WARNING")
+    log_group.set_defaults(log_level="WARNING" if rich else "INFO")
 
     args = parser.parse_args(namespace=Args())
 
