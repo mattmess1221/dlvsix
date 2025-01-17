@@ -1,18 +1,21 @@
 #!/usr/bin/env python
+# /// script
+# requires-python = ">=3.9"
+# dependencies = [
+#     "rich",
+# ]
+# ///
 from __future__ import annotations
 
-import sys
-
-if sys.version_info < (3, 9):  # noqa: UP036
-    sys.exit("Python 3.9 or higher is required.")
-
 import argparse
+import contextlib
 import io
 import json
 import logging
 import os
 import shutil
 import subprocess
+import sys
 import tarfile
 import traceback
 import typing as t
@@ -20,7 +23,18 @@ import urllib.parse
 import urllib.request
 import zipfile
 from collections.abc import Generator, Iterable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+if t.TYPE_CHECKING:
+    from rich.progress import TaskID
+
+try:
+    import rich
+except ImportError:
+    rich = None
+
+T = t.TypeVar("T")
 
 root = Path(__file__).parent.resolve()
 resources = root / "resources"
@@ -28,6 +42,10 @@ workdir = root / "vscode-extensions"
 
 
 IS_WSL = bool(os.getenv("WSL_DISTRO_NAME"))
+DISABLE_RICH = bool(os.getenv("DISABLE_RICH"))
+
+if DISABLE_RICH:
+    rich = None
 
 
 TARGET_PLATFORMS = [
@@ -109,6 +127,63 @@ BLUE = "\033[94m"
 WHITE = "\033[97m"
 
 
+class SafeThreadPoolExecutor(ThreadPoolExecutor):
+    def __exit__(self, *exc_info: t.Any) -> None:
+        if exc_info[0]:
+            if isinstance(exc_info[1], KeyboardInterrupt):
+                log.critical("Caught KeyboardInterrupt, shutting down")
+            else:
+                log.critical("Caught exception, shutting down", exc_info=exc_info)
+            self.shutdown(wait=False, cancel_futures=True)
+
+        super().__exit__(*exc_info)
+
+
+class Progress:
+    progress = None
+
+    def __init__(self) -> None:
+        if rich:
+            from rich.progress import Progress
+
+            self.progress = Progress()
+
+    def __enter__(self) -> t.Self:
+        if self.progress:
+            self.progress.start()
+        return self
+
+    def __exit__(self, *_: t.Any) -> None:
+        if self.progress:
+            self.progress.stop()
+
+    def track(self, iterable: Iterable[T], *, task_id: TaskID | None) -> Iterable[T]:
+        if self.progress:
+            return self.progress.track(iterable, task_id=task_id)
+
+        return iterable
+
+    @contextlib.contextmanager
+    def task(self, description: str) -> t.Generator[TaskID | None]:
+        if self.progress:
+            task = self.progress.add_task(description)
+            try:
+                yield task
+            finally:
+                self.progress.remove_task(task)
+        else:
+            yield None
+
+    def urllib_callback(
+        self, task: TaskID | None = None
+    ) -> t.Callable[[int, int, int], None] | None:
+        if self.progress and task is not None:
+            return lambda blocknum, bs, size, progress=self.progress: progress.update(
+                task, completed=blocknum * bs, total=size
+            )
+        return None
+
+
 class ColorFormatter(logging.Formatter):
     colors: t.ClassVar = {
         "debug": GRAY,
@@ -145,8 +220,15 @@ class ColorFormatter(logging.Formatter):
 def init_logger() -> logging.Logger:
     log = logging.getLogger()
     log.setLevel(logging.INFO)
-    handler = logging.StreamHandler(sys.stderr)
-    handler.setFormatter(ColorFormatter())
+
+    if rich:
+        from rich.logging import RichHandler
+
+        handler = RichHandler(show_time=False, show_path=False)
+    else:
+        handler = logging.StreamHandler(sys.stderr)
+        handler.setFormatter(ColorFormatter())
+
     log.addHandler(handler)
     return log
 
@@ -367,9 +449,7 @@ class Product:
             log.debug("Using update url: %s", update_url)
             return Distributions(self, update_url)
 
-        msg = (
-            "Unable to load update url from product.json." " Supply it via --update-url"
-        )
+        msg = "Unable to load update url from product.json. Supply it via --update-url"
         raise AppError(msg)
 
     def get_platform_server_name(self, platform: str) -> str:
@@ -465,12 +545,14 @@ class Distributions:
         self.dist_dir = workdir / "dist" / self.product.data["commit"]
         self.dist_dir.mkdir(exist_ok=True, parents=True)
 
-    def download_dist(self, dist: str, dest: Path) -> None:
+    def download_dist(self, dist: str, dest: Path, *, progress: Progress) -> None:
         commit = self.product.data["commit"]
         url = f"{self.update_url}/commit:{commit}/{dist}/stable"
-        download_file(url, dest)
+        download_file(url, dest, progress=progress)
 
-    def download_client(self, target_platform: str) -> None:
+    def download_client(
+        self, target_platform: str, executor: ThreadPoolExecutor, progress: Progress
+    ) -> None:
         for file in self.dist_dir.iterdir():
             if file.is_dir() and file.name != self.product.data["commit"]:
                 log.info("Removing old dist version %s", file)
@@ -482,12 +564,16 @@ class Distributions:
         for platform in self.get_dist_platforms(target_platform):
             if platform.startswith("alpine"):
                 continue
-            self.download_dist(
+            executor.submit(
+                self.download_dist,
                 get_platform_client_download(platform),
                 self.dist_dir / self.product.get_platform_client_name(platform),
+                progress=progress,
             )
 
-    def download_server(self, target_platform: str) -> None:
+    def download_server(
+        self, target_platform: str, executor: ThreadPoolExecutor, progress: Progress
+    ) -> None:
         if target_platform.startswith("alpine"):
             target_platform = target_platform.replace("alpine", "linux")
 
@@ -495,17 +581,23 @@ class Distributions:
             if platform.startswith("alpine"):
                 continue
             name = self.product.get_platform_server_name(platform)
-            self.download_dist(
+            executor.submit(
+                self.download_dist,
                 get_platform_server_download(platform),
                 self.dist_dir / name,
+                progress=progress,
             )
 
-    def download_cli(self, target_platform: str) -> None:
+    def download_cli(
+        self, target_platform: str, executor: ThreadPoolExecutor, progress: Progress
+    ) -> None:
         for platform in self.get_dist_platforms(target_platform):
             ext = "zip" if platform.startswith("win32") else "tar.gz"
-            self.download_dist(
+            executor.submit(
+                self.download_dist,
                 f"cli-{platform}",
                 self.dist_dir / f"vscode-cli-{platform}-cli.{ext}",
+                progress=progress,
             )
 
     @staticmethod
@@ -604,6 +696,8 @@ class Marketplace:
         self,
         extensions: Extensions,
         platforms: set[str],
+        executor: ThreadPoolExecutor,
+        progress: Progress,
     ) -> None:
         for ext in extensions.extensions:
             if self.is_extension_cached(ext, platforms):
@@ -619,9 +713,12 @@ class Marketplace:
 
                 base = self.extensions_dir / ext["identifier"]["id"] / ext["version"]
                 file = f"{ext['identifier']['id']}-{ext['version']}{suffix}.vsix"
-                download_file(url, base / file)
-
-            self.cleanup_old_extension_versions(ext)
+                fut = executor.submit(
+                    download_file, url, base / file, progress=progress
+                )
+                fut.add_done_callback(
+                    lambda _, ext=ext: self.cleanup_old_extension_versions(ext)
+                )
 
     def cleanup_old_extension_versions(self, ext: ExtensionData) -> None:
         ext_dir = self.extensions_dir / ext["identifier"]["id"]
@@ -633,15 +730,15 @@ class Marketplace:
                 vers_dir.rmdir()
 
 
-def download_file(url: str, dest: Path) -> None:
+def download_file(url: str, dest: Path, *, progress: Progress) -> None:
     file_log.add(dest.resolve())
     if dest.exists():
         return
-    log.info("Downloading %s", dest.name)
 
     dest.parent.mkdir(exist_ok=True, parents=True)
-    with urllib.request.urlopen(url) as response, dest.open("wb") as f:
-        shutil.copyfileobj(response, f)
+    with progress.task(f"Downloading {dest.name}") as task:
+        urllib.request.urlretrieve(url, dest, progress.urllib_callback(task))
+    log.info("Downloaded %s", dest.name)
 
 
 def copy_resource(src: Path, dest: Path) -> None:
@@ -697,10 +794,13 @@ def get_platform_client_download(platform: str) -> str:
     return platform
 
 
-def create_zip(dest: str, files: Iterable[Path]) -> None:
+def create_zip(dest: Path, files: Iterable[Path], progress: Progress) -> None:
     log.info("Preparing zip archive")
-    with zipfile.ZipFile(dest, "w", compression=zipfile.ZIP_DEFLATED) as zipf:
-        for file in files:
+    with (
+        progress.task(dest.name) as task_id,
+        zipfile.ZipFile(dest, "w", compression=zipfile.ZIP_DEFLATED) as zipf,
+    ):
+        for file in progress.track(files, task_id=task_id):
             zipf.write(file, file.relative_to(root))
 
 
@@ -712,22 +812,22 @@ def multidict(d: dict[str | tuple[str, ...], str]) -> dict[str, str]:
     }
 
 
-def get_tar_mode(file: str) -> TarFormat:
+def get_tar_mode(file: Path) -> TarFormat:
     for ext in TAR_MODES:
-        if file.endswith(ext):
+        if file.suffix.endswith(ext):
             return TAR_MODES[ext]
 
     msg = f"Unknown tar extension: {file}"
     raise AssertionError(msg)
 
 
-def create_tar(dest: str, files: Iterable[Path]) -> None:
+def create_tar(dest: Path, files: Iterable[Path], progress: Progress) -> None:
     mode = get_tar_mode(dest)
 
     arch_fmt = f"tar.{mode}".strip(".")
     log.info("Preparing %s archive", arch_fmt)
-    with tarfile.open(dest, "w:" + mode) as tar:
-        for file in files:
+    with progress.task(dest.name) as task_id, tarfile.open(dest, "w:" + mode) as tar:
+        for file in progress.track(files, task_id=task_id):
             tar.add(file, file.relative_to(root))
 
 
@@ -743,7 +843,7 @@ class Args:
     extensions_only: bool
     download_only: bool
 
-    output_file: str
+    output_file: Path
     log_level: str
 
 
@@ -816,15 +916,24 @@ def parse_args() -> Args:
         "--output-file",
         "-o",
         default="vscode-extensions.zip",
+        type=Path,
         help="Name of the archive file. Must be a zip or tar archive",
     )
 
     log_group = parser.add_mutually_exclusive_group()
     log_group.add_argument(
+        "-vv",
+        "--debug",
+        action="store_const",
+        const="DEBUG",
+        dest="log_level",
+        help="Enable debug logging",
+    )
+    log_group.add_argument(
         "-v",
         "--verbose",
         action="store_const",
-        const="DEBUG",
+        const="INFO",
         dest="log_level",
         help="Enable verbose",
     )
@@ -832,17 +941,17 @@ def parse_args() -> Args:
         "-q",
         "--quiet",
         action="store_const",
-        const="WARNING",
+        const="ERROR",
         dest="log_level",
         help="Disable output except for errors",
     )
     log_group.add_argument(
         "-qq",
-        "--very-quiet",
+        "--silent",
         action="store_const",
-        const="ERROR",
+        const="FATAL",
         dest="log_level",
-        help="Disable output except for errors",
+        help="Disable all output, including errors",
     )
     log_group.add_argument(
         "--log-level",
@@ -850,11 +959,11 @@ def parse_args() -> Args:
         help="Set the log level",
         type=str.upper,
     )
-    log_group.set_defaults(log_level="INFO")
+    log_group.set_defaults(log_level="WARNING")
 
     args = parser.parse_args(namespace=Args())
 
-    if not args.output_file.endswith((".zip", *TAR_EXTENSIONS)):
+    if args.output_file.suffix not in (".zip", *TAR_EXTENSIONS):
         parser.error("--output-file must be a zip or tar archive")
 
     return args
@@ -924,50 +1033,53 @@ def main() -> None:
     marketplace = product.marketplace(args.marketplace_url)
     dists = None if args.extensions_only else product.distributions(args.update_url)
 
-    if marketplace:
-        marketplace.download_extensions(extensions, platforms)
-        copy_script(
-            resources / "install-extensions.py",
-            workdir / "install-extensions.py",
+    with Progress() as progress, SafeThreadPoolExecutor(10) as executor:
+        if marketplace:
+            marketplace.download_extensions(extensions, platforms, executor, progress)
+            copy_script(
+                resources / "install-extensions.py",
+                workdir / "install-extensions.py",
+            )
+
+        if dists is not None:
+            dists.download_client(args.platform, executor, progress)
+
+            should_download_server = args.download_server
+            if should_download_server is None:
+                should_download_server = extensions.has_remoting_extension()
+
+            if should_download_server:
+                dists.download_server(args.server_platform, executor, progress)
+
+                dists.download_cli(args.server_platform, executor, progress)
+                if args.server_platform == "ALL":
+                    log.warning(
+                        "Server platform is set to ALL, not including install script"
+                    )
+                else:
+                    copy_install_script(
+                        product.data["commit"],
+                        product.data["version"],
+                        args.server_platform,
+                    )
+        executor.shutdown()
+
+        files = sorted(file_log)
+
+        # readme must be last because it calculates the file sizes
+        copy_readme(
+            files,
+            commit=product.data["commit"],
+            server_dist=product.get_platform_server_name(args.server_platform),
+            client_dist=product.get_platform_client_name(args.platform),
+            server_home=product.data["serverDataFolderName"],
         )
 
-    if dists is not None:
-        dists.download_client(args.platform)
-
-        should_download_server = args.download_server
-        if should_download_server is None:
-            should_download_server = extensions.has_remoting_extension()
-
-        if should_download_server:
-            dists.download_server(args.server_platform)
-            dists.download_cli(args.server_platform)
-            if args.server_platform == "ALL":
-                log.warning(
-                    "Server platform is set to ALL, not including install script"
-                )
+        if not args.download_only:
+            if args.output_file.suffix == ".zip":
+                create_zip(args.output_file, files, progress)
             else:
-                copy_install_script(
-                    product.data["commit"],
-                    product.data["version"],
-                    args.server_platform,
-                )
-
-    files = sorted(file_log)
-
-    # readme must be last because it calculates the file sizes
-    copy_readme(
-        files,
-        commit=product.data["commit"],
-        server_dist=product.get_platform_server_name(args.server_platform),
-        client_dist=product.get_platform_client_name(args.platform),
-        server_home=product.data["serverDataFolderName"],
-    )
-
-    if not args.download_only:
-        if args.output_file.endswith(".zip"):
-            create_zip(args.output_file, files)
-        else:
-            create_tar(args.output_file, files)
+                create_tar(args.output_file, files, progress)
 
 
 if __name__ == "__main__":
@@ -976,6 +1088,9 @@ if __name__ == "__main__":
     except AppError as e:
         log.error(str(e))  # noqa: TRY400
         sys.exit(1)
+    except KeyboardInterrupt:
+        log.critical("Aborted by user")
+        sys.exit(130)
     except Exception:  # noqa: BLE001
-        log.fatal("An unexpected error occurred", exc_info=True)
+        log.critical("An unexpected error occurred", exc_info=True)
         sys.exit(1)
