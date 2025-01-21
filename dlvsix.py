@@ -565,6 +565,7 @@ class Distributions:
     def download_dist(
         self, dist: str, dest: Path, *, progress: Progress, executor: ThreadPoolExecutor
     ) -> None:
+        file_log.add(dest.resolve())
         if dest.exists():
             return
         commit = self.product.data["commit"]
