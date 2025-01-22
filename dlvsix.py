@@ -863,11 +863,15 @@ class Args:
     platform: str
     server_platform: str
     download_server: bool | None
-    extensions_only: bool
-    download_only: bool
+    download_client: bool
+    download_extensions: bool
+    download_dists: bool
 
-    output_file: Path
+    output_file: Path | None
     log_level: str
+
+    def __repr__(self) -> str:
+        return f"Args({', '.join(f'{k}={v!r}' for k, v in vars(self).items())})"
 
 
 def parse_args() -> Args:
@@ -911,28 +915,25 @@ def parse_args() -> Args:
         help=argparse.SUPPRESS,
     )
     parser.add_argument(
-        "--download-server",
-        action="store_true",
-        dest="download_server",
-        help="Download server regardless of remoting extensions",
-    )
-    parser.add_argument(
         "--no-download-server",
         action="store_false",
         dest="download_server",
+        default=None,
         help="Do not download server regardless of remoting extensions",
     )
     parser.add_argument(
-        "--download-only",
-        action="store_true",
-        help="Only download, do not archive.",
+        "--no-download-client",
+        action="store_false",
+        dest="download_client",
+        help="Do not download the client.",
     )
-    parser.set_defaults(download_server=None)
     parser.add_argument(
+        "--no-download-dists",
         "--extensions-only",
         "-x",
-        action="store_true",
-        help="Download only the extensions",
+        action="store_false",
+        dest="download_dists",
+        help="Do not download any vscode distributions.",
     )
     # output options
     parser.add_argument(
@@ -941,6 +942,14 @@ def parse_args() -> Args:
         default="vscode-extensions.zip",
         type=Path,
         help="Name of the archive file. Must be a zip or tar archive",
+    )
+    parser.add_argument(
+        "--no-output-file",
+        "--download-only",
+        action="store_const",
+        const=None,
+        dest="output_file",
+        help="Disable creation of final archive file",
     )
 
     log_group = parser.add_mutually_exclusive_group()
@@ -986,13 +995,14 @@ def parse_args() -> Args:
 
     args = parser.parse_args(namespace=Args())
 
-    if args.output_file.suffix not in (".zip", *TAR_EXTENSIONS):
+    if args.output_file and args.output_file.suffix not in (".zip", *TAR_EXTENSIONS):
         parser.error("--output-file must be a zip or tar archive")
 
     return args
 
 
 def bytes_to_human(size: float) -> str:
+    _unit = "B"
     for _unit in ["B", "KB", "MB", "GB", "TB"]:
         if size < 1024.0:
             break
@@ -1043,6 +1053,7 @@ def copy_install_script(commit: str, version: str, platform: str) -> None:
 
 def main() -> None:
     args = parse_args()
+    print(args)
 
     log.setLevel(args.log_level)
 
@@ -1054,7 +1065,7 @@ def main() -> None:
     product = Product.load(args.code_home)
     extensions = product.load_extensions(args.extensions_dir)
     marketplace = product.marketplace(args.marketplace_url)
-    dists = None if args.extensions_only else product.distributions(args.update_url)
+    dists = None if not args.download_dists else product.distributions(args.update_url)
 
     with Progress() as progress, SafeThreadPoolExecutor(10) as executor:
         if marketplace:
@@ -1065,7 +1076,8 @@ def main() -> None:
             )
 
         if dists is not None:
-            dists.download_client(args.platform, executor, progress)
+            if args.download_client:
+                dists.download_client(args.platform, executor, progress)
 
             should_download_server = args.download_server
             if should_download_server is None:
@@ -1098,7 +1110,7 @@ def main() -> None:
             server_home=product.data["serverDataFolderName"],
         )
 
-    if not args.download_only:
+    if args.output_file:
         if args.output_file.suffix == ".zip":
             create_zip(args.output_file, files, progress)
         else:
