@@ -211,6 +211,7 @@ class ColorFormatter(logging.Formatter):
     }
 
     if sys.version_info >= (3, 13):
+
         @t.override
         def formatException(self, ei: t.Any) -> str:
             sio = io.StringIO()
