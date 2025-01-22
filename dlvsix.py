@@ -758,6 +758,7 @@ def download_file(url: str, dest: Path, *, progress: Progress) -> None:
     with progress.task(f"Downloading {dest.name}") as task:
         urllib.request.urlretrieve(url, dest, progress.urllib_callback(task))
     log.info("Downloaded %s", dest.name)
+    file_log.add(dest.resolve())
 
 
 def copy_resource(src: Path, dest: Path) -> None:
