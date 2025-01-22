@@ -211,10 +211,10 @@ class ColorFormatter(logging.Formatter):
     }
 
     if sys.version_info >= (3, 13):
-
-        def formatException(self, exc: t.Any) -> str:  # noqa: N802
+        @t.override
+        def formatException(self, ei: t.Any) -> str:
             sio = io.StringIO()
-            traceback.print_exception(*exc, file=sio, colorize=sys.stderr.isatty())  # type: ignore
+            traceback.print_exception(*ei, file=sio, colorize=sys.stderr.isatty())  # type: ignore
             s = sio.getvalue()
             sio.close()
             return s.rstrip("\n")
