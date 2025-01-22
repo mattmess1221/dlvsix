@@ -19,7 +19,6 @@ import sys
 import tarfile
 import traceback
 import typing as t
-import urllib.parse
 import urllib.request
 import zipfile
 from collections.abc import Generator, Iterable
