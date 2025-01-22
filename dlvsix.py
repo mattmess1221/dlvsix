@@ -458,7 +458,7 @@ class Product:
     def distributions(
         self,
         update_url: str | None,
-    ) -> Distributions | None:
+    ) -> Distributions:
         if update_url is None:
             update_url = self.data.get("updateUrl")
 
@@ -466,7 +466,10 @@ class Product:
             log.debug("Using update url: %s", update_url)
             return Distributions(self, update_url)
 
-        msg = "Unable to load update url from product.json. Supply it via --update-url"
+        msg = (
+            "Unable to load update url from product.json. Supply it via --update-url or"
+            " disable distributions via --no-download-dists"
+        )
         raise AppError(msg)
 
     def get_platform_server_name(self, platform: str) -> str:
