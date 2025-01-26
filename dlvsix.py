@@ -461,6 +461,17 @@ class Product:
         self,
         update_url: str | None,
     ) -> Distributions:
+        if self.data["applicationName"] == "codium":
+            msg = (
+                "Fetching of VSCodium distributions is not supported. Its API only"
+                " returns the latest version and does not support fetching the"
+                " currently installed version, which may not be the latest."
+                "\n\n"
+                "To disable fetching of distributions, pass the --no-download-dists"
+                " option."
+            )
+            raise AppError(msg)
+
         if update_url is None:
             update_url = self.data.get("updateUrl")
 
