@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import hashlib
 import io
 import json
 import logging
@@ -19,6 +20,7 @@ import sys
 import tarfile
 import traceback
 import typing as t
+import urllib.parse
 import urllib.request
 import zipfile
 from collections.abc import Generator, Iterable
@@ -557,6 +559,17 @@ class Extensions:
         )
 
 
+class ApiVersion(t.TypedDict):
+    url: str
+    name: str
+    version: str
+    productVersion: str
+    hash: str
+    timestamp: int
+    sha256hash: str
+    supportsFastUpdate: bool
+
+
 class Distributions:
     def __init__(self, product: Product, update_url: str) -> None:
         self.product = product
@@ -568,12 +581,25 @@ class Distributions:
     def download_dist(
         self, dist: str, dest: Path, *, progress: Progress, executor: ThreadPoolExecutor
     ) -> None:
-        file_log.add(dest.resolve())
         if dest.exists():
+            file_log.add(dest.resolve())
             return
+
+        # Microsoft's update API is basically undocumented
+        # https://stackoverflow.com/a/69810842/2351110
         commit = self.product.data["commit"]
-        url = f"{self.update_url}/commit:{commit}/{dist}/stable"
-        executor.submit(download_file, url, dest, progress=progress)
+        api_url = f"{self.update_url}/api/versions/commit:{commit}/{dist}/stable"
+
+        with urllib.request.urlopen(api_url) as resp:
+            data: ApiVersion = json.load(resp)
+
+        executor.submit(
+            download_file,
+            data["url"],
+            dest,
+            progress=progress,
+            sha256hash=data["sha256hash"],
+        )
 
     def download_client(
         self, target_platform: str, executor: ThreadPoolExecutor, progress: Progress
@@ -756,12 +782,29 @@ class Marketplace:
                 vers_dir.rmdir()
 
 
-def download_file(url: str, dest: Path, *, progress: Progress) -> None:
-    dest.parent.mkdir(exist_ok=True, parents=True)
-    with progress.task(f"Downloading {dest.name}") as task:
-        urllib.request.urlretrieve(url, dest, progress.urllib_callback(task))
-    log.info("Downloaded %s", dest.name)
-    file_log.add(dest.resolve())
+def verify_sha256_hash(filename: Path, sha256hash: str) -> bool:
+    log.debug("Verifying hash of %s", filename.name)
+    with filename.open("b") as f:
+        if sha256hash != hashlib.sha256(f.read()).digest().decode():
+            log.error("SHA256 Verify failed for %s!", filename.name)
+            filename.unlink()
+            return False
+        return True
+
+
+def download_file(
+    url: str, dest: Path, *, progress: Progress, sha256hash: str | None = None
+) -> None:
+    try:
+        dest.parent.mkdir(exist_ok=True, parents=True)
+        with progress.task(f"Downloading {dest.name}") as task:
+            urllib.request.urlretrieve(url, dest, progress.urllib_callback(task))
+    except urllib.request.HTTPError as e:
+        log.exception("Download failed with status %s for url: %s", e.status, url)
+    else:
+        if not sha256hash or verify_sha256_hash(dest, sha256hash):
+            log.info("Downloaded %s", dest.name)
+            file_log.add(dest.resolve())
 
 
 def copy_resource(src: Path, dest: Path) -> None:
