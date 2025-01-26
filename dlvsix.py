@@ -1053,7 +1053,6 @@ def copy_install_script(commit: str, version: str, platform: str) -> None:
 
 def main() -> None:
     args = parse_args()
-    print(args)
 
     log.setLevel(args.log_level)
 
