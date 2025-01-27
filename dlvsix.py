@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import functools
 import hashlib
 import io
 import json
@@ -809,6 +810,7 @@ def verify_sha256_hash(filename: Path, sha256hash: str) -> bool:
 
 
 def exc_logger(f: t.Callable[P, R]) -> t.Callable[P, R]:
+    @functools.wraps(f)
     def decorator(*args: P.args, **kwargs: P.kwargs) -> R:
         try:
             return f(*args, **kwargs)
