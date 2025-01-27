@@ -36,6 +36,8 @@ except ImportError:
     rich = None
 
 T = t.TypeVar("T")
+R = t.TypeVar("R")
+P = t.ParamSpec("P")
 
 root = Path(__file__).parent.resolve()
 resources = root / "resources"
@@ -805,8 +807,9 @@ def verify_sha256_hash(filename: Path, sha256hash: str) -> bool:
     return True
 
 
-def exc_logger(f):
-    def decorator(*args, **kwargs):
+
+def exc_logger(f: t.Callable[P, R]) -> t.Callable[P, R]:
+    def decorator(*args: P.args, **kwargs: P.kwargs) -> R:
         try:
             return f(*args, **kwargs)
         except Exception:
