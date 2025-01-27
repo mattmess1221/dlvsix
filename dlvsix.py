@@ -807,7 +807,6 @@ def verify_sha256_hash(filename: Path, sha256hash: str) -> bool:
     return True
 
 
-
 def exc_logger(f: t.Callable[P, R]) -> t.Callable[P, R]:
     @functools.wraps(f)
     def decorator(*args: P.args, **kwargs: P.kwargs) -> R:
@@ -816,6 +815,7 @@ def exc_logger(f: t.Callable[P, R]) -> t.Callable[P, R]:
         except Exception:
             log.exception("Unhandled exception during %s()", f.__name__)
             raise
+
     return decorator
 
 
