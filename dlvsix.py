@@ -795,14 +795,27 @@ class Marketplace:
 
 def verify_sha256_hash(filename: Path, sha256hash: str) -> bool:
     log.debug("Verifying hash of %s", filename.name)
-    with filename.open("b") as f:
-        if sha256hash != hashlib.sha256(f.read()).digest().decode():
-            log.error("SHA256 Verify failed for %s!", filename.name)
-            filename.unlink()
-            return False
-        return True
+    with filename.open("br") as f:
+        actual_hash = hashlib.sha256(f.read()).hexdigest()
+
+    if sha256hash != actual_hash:
+        log.error("SHA256 Verify failed for %s!", filename.name)
+        filename.unlink()
+        return False
+    return True
 
 
+def exc_logger(f):
+    def decorator(*args, **kwargs):
+        try:
+            return f(*args, **kwargs)
+        except Exception:
+            log.exception("Unhandled exception during %s()", f.__name__)
+            raise
+    return decorator
+
+
+@exc_logger
 def download_file(
     url: str, dest: Path, *, progress: Progress, sha256hash: str | None = None
 ) -> None:
