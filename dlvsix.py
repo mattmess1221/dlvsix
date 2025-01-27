@@ -176,7 +176,6 @@ class Progress:
 
     @classmethod
     def track(cls, sequence: Iterable[T], **kwargs: t.Any) -> Iterable[T]:
-        global rich
         if rich:
             from rich.progress import track
 
