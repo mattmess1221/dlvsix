@@ -28,17 +28,17 @@ from collections.abc import Generator, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-if t.TYPE_CHECKING:
-    from rich.progress import TaskID
-
 try:
     import rich
 except ImportError:
     rich = None
 
-T = t.TypeVar("T")
-R = t.TypeVar("R")
-P = t.ParamSpec("P")
+if t.TYPE_CHECKING:
+    from rich.progress import TaskID
+
+    T = t.TypeVar("T")
+    R = t.TypeVar("R")
+    P = t.ParamSpec("P")
 
 root = Path(__file__).parent.resolve()
 resources = root / "resources"
