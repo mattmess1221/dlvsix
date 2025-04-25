@@ -3,6 +3,7 @@
 # requires-python = ">=3.9"
 # dependencies = [
 #     "rich",
+#     "rich-argparse",
 # ]
 # ///
 from __future__ import annotations
@@ -32,6 +33,11 @@ try:
     import rich
 except ImportError:
     rich = None
+
+try:
+    from rich_argparse import RichHelpFormatter as HelpFormatter
+except ImportError:
+    from argparse import HelpFormatter
 
 if t.TYPE_CHECKING:
     from rich.progress import TaskID
@@ -967,58 +973,70 @@ class Args:
 
 def parse_args() -> Args:
     parser = argparse.ArgumentParser(
-        description="Download Visual Studio Code extensions and installation files"
+        description="Download Visual Studio Code extensions and installation files",
+        formatter_class=HelpFormatter,
+    )
+    base_options = parser.add_argument_group(
+        "Product Options",
+        description=(
+            "These options are auto-detected by default. Use them to override the"
+            " defaults."
+        ),
     )
     # auto-discovery override options
-    parser.add_argument(
+    base_options.add_argument(
         "--code-home",
         type=Path,
         help="Path to Visual Studio Code installation",
     )
-    parser.add_argument(
+    base_options.add_argument(
         "--extensions-dir",
         type=Path,
         help="Path to extensions directory",
     )
-    parser.add_argument(
+    base_options.add_argument(
         "--marketplace-url",
         "-m",
         help="Marketplace URL to download the extension. Default loads from vscode",
     )
-    parser.add_argument(
+    base_options.add_argument(
         "--update-url",
         help="The update url used to download code installers.",
     )
 
     # download options
-    parser.add_argument(
+    ext_group = parser.add_argument_group(
+        "Extension Options",
+        description="Options for downloading and selecting extensions to pack.",
+    )
+    ext_group.add_argument(
         "--platform",
         "-p",
         choices=["ALL", *TARGET_PLATFORMS],
         default="win32-x64",
         help="Client platform, defaults to win32-x64",
     )
-    parser.add_argument(
+    ext_group.add_argument(
         "--server-platform",
         "-s",
         choices=["ALL", *TARGET_PLATFORMS],
         default="linux-x64",
         help=argparse.SUPPRESS,
     )
-    parser.add_argument(
+    ext_group.add_argument(
         "--no-download-server",
         action="store_false",
         dest="download_server",
         default=None,
         help="Do not download server regardless of remoting extensions",
     )
-    parser.add_argument(
+    ext_group.add_argument(
         "--no-download-client",
         action="store_false",
         dest="download_client",
         help="Do not download the client.",
     )
-    parser.add_argument(
+    ext_group.add_argument(
         "--no-download-dists",
         "--extensions-only",
         "-x",
@@ -1026,7 +1044,7 @@ def parse_args() -> Args:
         dest="download_dists",
         help="Do not download any vscode distributions.",
     )
-    parser.add_argument(
+    ext_group.add_argument(
         "--ignore-extension",
         "-i",
         dest="ignored_extensions",
@@ -1040,14 +1058,18 @@ def parse_args() -> Args:
         ),
     )
     # output options
-    parser.add_argument(
+    output_group = parser.add_argument_group(
+        "Output Options",
+        description="Options for output files.",
+    ).add_mutually_exclusive_group()
+    output_group.add_argument(
         "--output-file",
         "-o",
         default="vscode-extensions.zip",
         type=Path,
         help="Name of the archive file. Must be a zip or tar archive",
     )
-    parser.add_argument(
+    output_group.add_argument(
         "--no-output-file",
         "--download-only",
         action="store_const",
@@ -1056,7 +1078,13 @@ def parse_args() -> Args:
         help="Disable creation of final archive file",
     )
 
-    log_group = parser.add_mutually_exclusive_group()
+    log_group = parser.add_argument_group(
+        "Logging Options",
+        description=(
+            "Set the log level. The default is INFO, which is verbose. If rich "
+            "is installed, the default will be WARNING."
+        ),
+    ).add_mutually_exclusive_group()
     log_group.add_argument(
         "-vv",
         "--debug",
