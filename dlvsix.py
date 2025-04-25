@@ -521,7 +521,9 @@ class Product:
 
         return home / self.data["dataFolderName"]
 
-    def load_extensions(self, extensions_dir: Path | None) -> Extensions:
+    def load_extensions(
+        self, extensions_dir: Path | None, *, ignored: set[str]
+    ) -> Extensions:
         if extensions_dir is None:
             extensions_dir = self.get_data_folder() / "extensions"
 
@@ -539,6 +541,11 @@ class Product:
                 ext["metadata"]["installedTimestamp"],
             )
         )
+
+        # Exclude explicitly ignored extensions
+        data = [
+            ext for ext in data if ext["identifier"]["id"].casefold() not in ignored
+        ]
 
         # extensions can contain duplicates, so only include the most recently installed
         # version.
@@ -570,6 +577,18 @@ class Extensions:
             plugin["identifier"]["id"] in REMOTING_EXTENSION_IDS
             for plugin in self.extensions
         )
+
+    @classmethod
+    def read_ignored_extensions(cls) -> list[str]:
+        ignorefile = root / ".vsixignore"
+        if ignorefile.exists():
+            with ignorefile.open() as f:
+                return [
+                    ext_id.casefold()
+                    for line in f
+                    if (ext_id := line.split("#")[0].strip())
+                ]
+        return []
 
 
 class ApiVersion(t.TypedDict):
@@ -937,6 +956,7 @@ class Args:
     download_client: bool
     download_extensions: bool
     download_dists: bool
+    ignored_extensions: list[str]
 
     output_file: Path | None
     log_level: str
@@ -1005,6 +1025,19 @@ def parse_args() -> Args:
         action="store_false",
         dest="download_dists",
         help="Do not download any vscode distributions.",
+    )
+    parser.add_argument(
+        "--ignore-extension",
+        "-i",
+        dest="ignored_extensions",
+        metavar="EXTENSION_ID",
+        default=[],
+        type=str.casefold,
+        action="append",
+        help=(
+            "Ignore an extension by id. Can be used multiple times, case-insensitive."
+            " Can also be set in the file .vsixignore, one entry per line."
+        ),
     )
     # output options
     parser.add_argument(
@@ -1133,7 +1166,13 @@ def main() -> None:
         platforms = {args.platform, args.server_platform}
 
     product = Product.load(args.code_home)
-    extensions = product.load_extensions(args.extensions_dir)
+
+    ignored = {
+        *(args.ignored_extensions or []),
+        *Extensions.read_ignored_extensions(),
+    }
+
+    extensions = product.load_extensions(args.extensions_dir, ignored=ignored)
     marketplace = product.marketplace(args.marketplace_url)
     dists = None if not args.download_dists else product.distributions(args.update_url)
 
