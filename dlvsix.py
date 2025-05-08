@@ -22,7 +22,6 @@ import sys
 import tarfile
 import traceback
 import typing as t
-import urllib.parse
 import urllib.request
 import zipfile
 from collections.abc import Generator, Iterable
@@ -151,6 +150,20 @@ class SafeThreadPoolExecutor(ThreadPoolExecutor):
         super().__exit__(*exc_info)
 
 
+class CountingIO(t.IO[bytes]):
+    def __init__(self, raw: t.IO[bytes], callback: t.Callable[[int], None]) -> None:
+        self.raw = raw
+        self.callback = callback
+
+    def read(self, n: int = -1) -> bytes:
+        data = self.raw.read(n)
+        self.callback(len(data))
+        return data
+
+    def __getattr__(self, name: str) -> t.Any:
+        return getattr(self.raw, name)
+
+
 class Progress:
     progress = None
 
@@ -189,15 +202,30 @@ class Progress:
         return sequence
 
     @contextlib.contextmanager
-    def task(self, description: str) -> t.Generator[TaskID | None]:
+    def task(
+        self, description: str, *, total: int | None = None
+    ) -> t.Generator[TaskID | None]:
         if self.progress:
-            task = self.progress.add_task(description, total=None)
+            task = self.progress.add_task(description, total=total)
             try:
                 yield task
             finally:
                 self.progress.remove_task(task)
         else:
             yield None
+
+    def update(
+        self,
+        task: TaskID | None,
+        *,
+        advance: int | None = None,
+        completed: int | None = None,
+        total: int | None = None,
+    ) -> None:
+        if task is not None and self.progress:
+            self.progress.update(
+                task, advance=advance, completed=completed, total=total
+            )
 
     def urllib_callback(
         self, task: TaskID | None = None
@@ -207,6 +235,12 @@ class Progress:
                 task, completed=blocknum * bs, total=size
             )
         return None
+
+    def wrap_file(self, task: TaskID | None, srcobj: t.IO[bytes]) -> t.IO[bytes]:
+        def update_tasks(n: int) -> None:
+            self.update(task, advance=n)
+
+        return CountingIO(srcobj, update_tasks)
 
 
 class ColorFormatter(logging.Formatter):
@@ -956,14 +990,27 @@ def get_platform_client_download(platform: str) -> str:
     return platform
 
 
+def count_total_bytes(paths: Iterable[Path]) -> int:
+    return sum(path.stat().st_size for path in paths if path.is_file())
+
+
 def create_zip(dest: Path, files: Iterable[Path], *, progress: Progress) -> None:
     log.info("Preparing zip archive")
     with (
-        # progress.task(dest.name) as task_id,
+        progress.task(dest.name, total=count_total_bytes(files)) as task_id,
         zipfile.ZipFile(dest, "w", compression=zipfile.ZIP_DEFLATED) as zipf,
     ):
-        for file in progress.track(files, description=dest.name):
-            zipf.write(file, file.relative_to(root))
+        for file in files:
+            with progress.task("⨽" + file.name, total=file.stat().st_size) as file_task:
+                # manually write the file to the zip archive
+                # zipfile does not support progress tracking
+                zinfo = zipfile.ZipInfo.from_file(file, str(file.relative_to(root)))
+                zinfo.compress_type = zipf.compression
+                zinfo.compress_level = zipf.compresslevel
+                with file.open("rb") as srcobj, zipf.open(zinfo, "w") as destobj:
+                    srcobj = progress.wrap_file(file_task, srcobj)
+                    srcobj = progress.wrap_file(task_id, srcobj)
+                    shutil.copyfileobj(srcobj, destobj)
 
 
 def multidict(d: dict[str | tuple[str, ...], str]) -> dict[str, str]:
@@ -976,7 +1023,7 @@ def multidict(d: dict[str | tuple[str, ...], str]) -> dict[str, str]:
 
 def get_tar_mode(file: Path) -> TarFormat:
     for ext in TAR_MODES:
-        if file.suffix.endswith(ext):
+        if file.name.endswith(ext):
             return TAR_MODES[ext]
 
     msg = f"Unknown tar extension: {file}"
@@ -988,9 +1035,18 @@ def create_tar(dest: Path, files: Iterable[Path], *, progress: Progress) -> None
 
     arch_fmt = f"tar.{mode}".strip(".")
     log.info("Preparing %s archive", arch_fmt)
-    with tarfile.open(dest, "w:" + mode) as tar:
-        for file in progress.track(files, description=dest.name):
-            tar.add(file, file.relative_to(root))
+    with (
+        progress.task(dest.name, total=count_total_bytes(files)) as task_id,
+        tarfile.open(dest, "w:" + mode) as tar,
+    ):
+        for file in files:
+            with progress.task("⨽" + file.name, total=file.stat().st_size) as file_task:
+                tarinfo = tar.gettarinfo(file, str(file.relative_to(root)))
+                with file.open("rb") as srcobj:
+                    srcobj = progress.wrap_file(file_task, srcobj)
+                    srcobj = progress.wrap_file(task_id, srcobj)
+
+                    tar.addfile(tarinfo, srcobj)
 
 
 class Args:
@@ -1176,7 +1232,9 @@ def parse_args() -> Args:
 
     args = parser.parse_args(namespace=Args())
 
-    if args.output_file and args.output_file.suffix not in (".zip", *TAR_EXTENSIONS):
+    valid_extensions = {".zip", *TAR_EXTENSIONS}
+
+    if args.output_file and "".join(args.output_file.suffixes) not in valid_extensions:
         parser.error("--output-file must be a zip or tar archive")
 
     return args
