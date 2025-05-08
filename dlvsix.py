@@ -76,7 +76,7 @@ TAR_MODES: dict[str | tuple[str, ...], TarFormat] = {
     (".tar.gz", ".tgz"): "gz",
     (".tar.xz", ".txz"): "xz",
     (".tar.bz2", ".tbz2", ".tbz"): "bz2",
-    ".tar": "",
+    (".tar",): "",
 }
 TAR_EXTENSIONS = tuple(ext for exts in TAR_MODES for ext in exts)
 
@@ -1232,9 +1232,9 @@ def parse_args() -> Args:
 
     args = parser.parse_args(namespace=Args())
 
-    valid_extensions = {".zip", *TAR_EXTENSIONS}
+    valid_extensions = (".zip", *TAR_EXTENSIONS)
 
-    if args.output_file and "".join(args.output_file.suffixes) not in valid_extensions:
+    if args.output_file and not args.output_file.name.endswith(valid_extensions):
         parser.error("--output-file must be a zip or tar archive")
 
     return args
