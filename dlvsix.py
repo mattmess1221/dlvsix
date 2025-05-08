@@ -1002,12 +1002,8 @@ def create_zip(dest: Path, files: Iterable[Path], *, progress: Progress) -> None
     ):
         for file in files:
             with progress.task("⨽" + file.name, total=file.stat().st_size) as file_task:
-                # manually write the file to the zip archive
-                # zipfile does not support progress tracking
-                zinfo = zipfile.ZipInfo.from_file(file, str(file.relative_to(root)))
-                zinfo.compress_type = zipf.compression
-                zinfo.compress_level = zipf.compresslevel
-                with file.open("rb") as srcobj, zipf.open(zinfo, "w") as destobj:
+                arcname = str(file.relative_to(root))
+                with file.open("rb") as srcobj, zipf.open(arcname, "w") as destobj:
                     srcobj = progress.wrap_file(file_task, srcobj)
                     srcobj = progress.wrap_file(task_id, srcobj)
                     shutil.copyfileobj(srcobj, destobj)
