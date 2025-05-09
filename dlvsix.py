@@ -436,7 +436,7 @@ if t.TYPE_CHECKING:
         ) -> None: ...
 
 
-@dataclass(kw_only=True)
+@dataclass()
 class App:
     progress: Progress
     executor: ThreadPoolExecutor
