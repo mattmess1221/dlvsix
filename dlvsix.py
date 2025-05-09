@@ -44,7 +44,6 @@ from rich_argparse import RichHelpFormatter
 if t.TYPE_CHECKING:
     P = t.ParamSpec("P")
     Ts = t.TypeVarTuple("Ts")
-    T = t.TypeVar("T")
     R = t.TypeVar("R", covariant=True)
 
 root = Path(__file__).parent.resolve()
