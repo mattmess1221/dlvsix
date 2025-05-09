@@ -29,19 +29,19 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
-try:
-    import rich
-except ImportError:
-    rich = None
-
-try:
-    from rich_argparse import RichHelpFormatter as HelpFormatter
-except ImportError:
-    from argparse import HelpFormatter
+from rich.logging import RichHandler
+from rich.progress import (
+    BarColumn,
+    DownloadColumn,
+    TaskID,
+    TaskProgressColumn,
+    TextColumn,
+    TimeRemainingColumn,
+)
+from rich.progress import Progress as _Progress
+from rich_argparse import RichHelpFormatter
 
 if t.TYPE_CHECKING:
-    from rich.progress import TaskID
-
     P = t.ParamSpec("P")
     Ts = t.TypeVarTuple("Ts")
     T = t.TypeVar("T")
@@ -53,10 +53,6 @@ workdir = root / "vscode-extensions"
 
 
 IS_WSL = bool(os.getenv("WSL_DISTRO_NAME"))
-DISABLE_RICH = bool(os.getenv("DISABLE_RICH"))
-
-if DISABLE_RICH:
-    rich = None
 
 
 TARGET_PLATFORMS = [
@@ -165,82 +161,55 @@ class CountingIO(t.IO[bytes]):
 
 
 class Progress:
-    progress = None
-
     def __init__(self) -> None:
-        if rich:
-            from rich.progress import (
-                BarColumn,
-                DownloadColumn,
-                Progress,
-                TaskProgressColumn,
-                TextColumn,
-                TimeRemainingColumn,
-            )
-
-            self.progress = Progress(
-                TextColumn("[progress.description]{task.description:80}"),
-                BarColumn(),
-                DownloadColumn(),
-                TaskProgressColumn(),
-                TimeRemainingColumn(),
-            )
+        self.progress = _Progress(
+            TextColumn("[progress.description]{task.description:80}"),
+            BarColumn(),
+            DownloadColumn(),
+            TaskProgressColumn(),
+            TimeRemainingColumn(),
+        )
 
     def __enter__(self) -> t.Self:
-        if self.progress:
-            self.progress.start()
+        self.progress.start()
         return self
 
     def __exit__(self, *_: t.Any) -> None:
-        if self.progress:
-            self.progress.stop()
-
-    def track(self, sequence: Iterable[T], **kwargs: t.Any) -> Iterable[T]:
-        if self.progress:
-            return self.progress.track(sequence, **kwargs)
-
-        return sequence
+        self.progress.stop()
 
     @contextlib.contextmanager
     def task(
         self, description: str, *, total: int | None = None
-    ) -> t.Generator[TaskID | None]:
-        if self.progress:
-            task = self.progress.add_task(description, total=total)
-            try:
-                yield task
-            finally:
-                self.progress.remove_task(task)
-        else:
-            yield None
+    ) -> t.Generator[ProgressTask]:
+        task = self.progress.add_task(description, total=total)
+        try:
+            yield ProgressTask(self, task)
+        finally:
+            self.progress.remove_task(task)
 
     def update(
         self,
-        task: TaskID | None,
+        task: TaskID,
         *,
         advance: int | None = None,
         completed: int | None = None,
         total: int | None = None,
     ) -> None:
-        if task is not None and self.progress:
-            self.progress.update(
-                task, advance=advance, completed=completed, total=total
-            )
+        self.progress.update(task, advance=advance, completed=completed, total=total)
 
-    def urllib_callback(
-        self, task: TaskID | None = None
-    ) -> t.Callable[[int, int, int], None] | None:
-        if self.progress and task is not None:
-            return lambda blocknum, bs, size, progress=self.progress: progress.update(
-                task, completed=blocknum * bs, total=size
-            )
-        return None
 
-    def wrap_file(self, task: TaskID | None, srcobj: t.IO[bytes]) -> t.IO[bytes]:
-        def update_tasks(n: int) -> None:
-            self.update(task, advance=n)
+class ProgressTask:
+    def __init__(self, progress: Progress, task: TaskID) -> None:
+        self.progress = progress
+        self.task = task
 
-        return CountingIO(srcobj, update_tasks)
+    def urllib_callback(self) -> t.Callable[[int, int, int], None] | None:
+        return lambda blocknum, bs, size: self.progress.update(
+            self.task, completed=blocknum * bs, total=size
+        )
+
+    def wrap_file(self, srcobj: t.IO[bytes]) -> t.IO[bytes]:
+        return CountingIO(srcobj, lambda n: self.progress.update(self.task, advance=n))
 
 
 class ColorFormatter(logging.Formatter):
@@ -281,13 +250,7 @@ def init_logger() -> logging.Logger:
     log = logging.getLogger()
     log.setLevel(logging.INFO)
 
-    if rich:
-        from rich.logging import RichHandler
-
-        handler = RichHandler(show_time=False, show_path=False)
-    else:
-        handler = logging.StreamHandler(sys.stderr)
-        handler.setFormatter(ColorFormatter())
+    handler = RichHandler(show_time=False, show_path=False)
 
     log.addHandler(handler)
     return log
@@ -928,7 +891,7 @@ def download_file(
     try:
         dest.parent.mkdir(exist_ok=True, parents=True)
         with progress.task(f"Downloading {dest.name}") as task:
-            urllib.request.urlretrieve(url, dest, progress.urllib_callback(task))
+            urllib.request.urlretrieve(url, dest, task.urllib_callback())
     except urllib.request.HTTPError as e:
         log.exception("Download failed with status %s for url: %s", e.status, url)
     else:
@@ -997,15 +960,15 @@ def count_total_bytes(paths: Iterable[Path]) -> int:
 def create_zip(dest: Path, files: Iterable[Path], *, progress: Progress) -> None:
     log.info("Preparing zip archive")
     with (
-        progress.task(dest.name, total=count_total_bytes(files)) as task_id,
+        progress.task(dest.name, total=count_total_bytes(files)) as zip_task,
         zipfile.ZipFile(dest, "w", compression=zipfile.ZIP_DEFLATED) as zipf,
     ):
         for file in files:
             with progress.task("⨽" + file.name, total=file.stat().st_size) as file_task:
                 arcname = str(file.relative_to(root))
                 with file.open("rb") as srcobj, zipf.open(arcname, "w") as destobj:
-                    srcobj = progress.wrap_file(file_task, srcobj)
-                    srcobj = progress.wrap_file(task_id, srcobj)
+                    srcobj = file_task.wrap_file(srcobj)
+                    srcobj = zip_task.wrap_file(srcobj)
                     shutil.copyfileobj(srcobj, destobj)
 
 
@@ -1032,15 +995,15 @@ def create_tar(dest: Path, files: Iterable[Path], *, progress: Progress) -> None
     arch_fmt = f"tar.{mode}".strip(".")
     log.info("Preparing %s archive", arch_fmt)
     with (
-        progress.task(dest.name, total=count_total_bytes(files)) as task_id,
+        progress.task(dest.name, total=count_total_bytes(files)) as tar_task,
         tarfile.open(dest, "w:" + mode) as tar,
     ):
         for file in files:
             with progress.task("⨽" + file.name, total=file.stat().st_size) as file_task:
                 tarinfo = tar.gettarinfo(file, str(file.relative_to(root)))
                 with file.open("rb") as srcobj:
-                    srcobj = progress.wrap_file(file_task, srcobj)
-                    srcobj = progress.wrap_file(task_id, srcobj)
+                    srcobj = file_task.wrap_file(srcobj)
+                    srcobj = tar_task.wrap_file(srcobj)
 
                     tar.addfile(tarinfo, srcobj)
 
@@ -1070,7 +1033,7 @@ class Args:
 def parse_args() -> Args:
     parser = argparse.ArgumentParser(
         description="Download Visual Studio Code extensions and installation files",
-        formatter_class=HelpFormatter,
+        formatter_class=RichHelpFormatter,
     )
     base_options = parser.add_argument_group(
         "Product Options",
