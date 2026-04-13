@@ -832,8 +832,9 @@ class Marketplace:
                 file = f"{ext['identifier']['id']}-{ext['version']}{suffix}.vsix"
                 fut = self.app.submit(download_file, url, base / file)
                 fut.add_done_callback(
-                    lambda fut, ext=ext: fut.cancelled()
-                    or self.cleanup_old_extension_versions(ext)
+                    lambda fut, ext=ext: (
+                        fut.cancelled() or self.cleanup_old_extension_versions(ext)
+                    )
                 )
 
     def cleanup_old_extension_versions(self, ext: ExtensionData) -> None:
@@ -1328,6 +1329,6 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         log.critical("Aborted by user")
         sys.exit(130)
-    except Exception:  # noqa: BLE001
+    except Exception:
         log.critical("An unexpected error occurred", exc_info=True)
         sys.exit(1)
